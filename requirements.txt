@@ -1,0 +1,31 @@
+# Core FastAPI stack
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic==2.10.0
+pydantic-settings==2.6.0
+sqlalchemy==2.0.36
+alembic==1.14.0
+python-multipart==0.0.17
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt>=4.0.0,<5.0.0  # Pin bcrypt v4.x for passlib compatibility
+email-validator==2.2.0
+
+# Image processing
+Pillow==10.4.0
+
+# ML/AI - Hybrid Engine (CRITICAL ✅)
+transformers==4.45.0
+torch==2.6.0
+torchvision==0.21.0
+accelerate==0.30.0
+huggingface_hub==0.26.2
+
+# Environment
+python-dotenv==1.0.1
+
+# Dev tools
+pytest==8.3.4
+black==24.10.0
+flake8==7.1.1
+mypy==1.13.0
