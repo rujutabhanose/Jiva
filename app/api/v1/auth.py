@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException, Depends
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from sqlalchemy.orm import Session
@@ -9,10 +8,7 @@ from app.core.security import (
     hash_password,
     verify_password,
     create_access_token,
-    create_email_verify_token,
 )
-from app.services.email_service import send_verification_email
-from datetime import datetime
 
 router = APIRouter()
 
@@ -60,11 +56,6 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     # Verify password
     if not verify_password(request.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    if not user.is_verified:
-        raise HTTPException(
-            status_code=403,
-            detail="Please verify your email to continue"
-    )
 
     # Create access token
     access_token = create_access_token(subject=user.email)
@@ -104,8 +95,7 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         device_user.user_type = request.userType
         device_user.plant_types = request.plantTypes
         device_user.platform = request.platform
-        device_user.is_verified = False
-        device_user.verified_at = None
+        device_user.is_verified = True
 
         db.commit()
         db.refresh(device_user)
@@ -120,16 +110,13 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
             plant_types=request.plantTypes,
             device_id=request.device_id,
             platform=request.platform,
-            is_verified=False,
+            is_verified=True,
         )
         db.add(user)
         db.commit()
         db.refresh(user)
 
-    # ✅ Send verification email
-    token = create_email_verify_token(user.id)
-    send_verification_email(user.email, token)
-
+    # Create access token
     access_token = create_access_token(subject=user.email)
 
     return {
@@ -138,113 +125,14 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         "user": {
             "id": user.id,
             "email": user.email,
-            "isVerified": user.is_verified,
+            "name": user.name,
+            "country": user.country,
+            "userType": user.user_type,
+            "plantTypes": user.plant_types,
+            "isPremium": user.is_premium,
+            "freeScansLeft": user.free_scans_left
         }
     }
-
-@router.get("/verify-email")
-def verify_email(token: str, db: Session = Depends(get_db)):
-    from app.core.security import decode_email_verify_token
-
-    try:
-        user_id = decode_email_verify_token(token)
-    except Exception:
-        return HTMLResponse(content="""
-            <html>
-            <head><title>Verification Failed</title></head>
-            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-                <h1 style="color: #f44336;">Verification Failed</h1>
-                <p>This verification link is invalid or has expired.</p>
-                <p>Please request a new verification email from the app.</p>
-            </body>
-            </html>
-        """, status_code=400)
-
-    user = db.query(User).get(user_id)
-    if not user:
-        return HTMLResponse(content="""
-            <html>
-            <head><title>User Not Found</title></head>
-            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-                <h1 style="color: #f44336;">User Not Found</h1>
-                <p>The user associated with this verification link could not be found.</p>
-            </body>
-            </html>
-        """, status_code=404)
-
-    if not user.is_verified:
-        user.is_verified = True
-        user.verified_at = datetime.utcnow()
-        db.commit()
-
-    # Return HTML page with deep link
-    deep_link = f"jivaplants://verify-email?token={token}"
-
-    return HTMLResponse(content=f"""
-        <html>
-        <head>
-            <title>Email Verified!</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <script>
-                // Try to open the app automatically
-                window.location.href = "{deep_link}";
-
-                // If app doesn't open in 2 seconds, show the manual button
-                setTimeout(function() {{
-                    document.getElementById('manual-open').style.display = 'block';
-                }}, 2000);
-            </script>
-        </head>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background-color: #f5f5f5;">
-            <div style="max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-                <div style="font-size: 64px; margin-bottom: 20px;">✅</div>
-                <h1 style="color: #4CAF50; margin-bottom: 10px;">Email Verified!</h1>
-                <p style="color: #666; font-size: 16px; margin-bottom: 30px;">
-                    Your email has been successfully verified.
-                </p>
-
-                <div id="manual-open" style="display: none;">
-                    <p style="color: #666; font-size: 14px; margin-bottom: 20px;">
-                        If the app didn't open automatically, click the button below:
-                    </p>
-                    <a href="{deep_link}"
-                       style="display: inline-block; background-color: #4CAF50; color: white; padding: 15px 30px;
-                              text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
-                        Open Jiva Plants App
-                    </a>
-
-                    <p style="color: #999; font-size: 12px; margin-top: 30px;">
-                        Testing on emulator? The app is already verified. Just sign in with your credentials.
-                    </p>
-                </div>
-            </div>
-        </body>
-        </html>
-    """)
-
-
-@router.post("/resend-verification")
-def resend_verification(request: LoginRequest, db: Session = Depends(get_db)):
-    """Resend verification email to user"""
-    # Find user by email
-    user = db.query(User).filter(User.email == request.email).first()
-
-    if not user:
-        # Don't reveal if email exists or not for security
-        return {"message": "If the email exists, a verification link has been sent"}
-
-    if user.is_verified:
-        raise HTTPException(status_code=400, detail="Email is already verified")
-
-    # Generate new verification token
-    token = create_email_verify_token(user.id)
-
-    # Send verification email
-    try:
-        send_verification_email(user.email, token)
-        return {"message": "Verification email sent successfully"}
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to send verification email")
 
 @router.post("/logout")
 async def logout():

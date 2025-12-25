@@ -9,8 +9,6 @@ from app.core.config import settings
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-EMAIL_VERIFY_EXP_MIN = 30
-
 # HTTP Bearer token scheme
 security = HTTPBearer()
 
@@ -34,25 +32,6 @@ def create_access_token(subject: str) -> str:
         "scope": "access_token"
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-
-
-def create_email_verify_token(user_id: int) -> str:
-    """Create email verification token"""
-    expire = datetime.utcnow() + timedelta(minutes=EMAIL_VERIFY_EXP_MIN)
-    payload = {
-        "sub": str(user_id),
-        "exp": expire,
-        "scope": "email_verify"
-    }
-    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-
-
-def decode_email_verify_token(token: str) -> int:
-    """Decode email verification token and return user ID"""
-    payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-    if payload.get("scope") != "email_verify":
-        raise JWTError("Invalid scope")
-    return int(payload["sub"])
 
 
 def get_current_user_email(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:

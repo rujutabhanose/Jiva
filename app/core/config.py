@@ -58,14 +58,6 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
-    # Email Configuration
-    SMTP_HOST: str = "smtp.gmail.com"
-    SMTP_PORT: int = 587
-    SMTP_USER: str = ""
-    SMTP_PASS: str = ""
-    FROM_EMAIL: str = ""
-    FRONTEND_URL: str = "http://localhost:8000/api/v1/auth"
-
     class Config:
         env_file = ".env"
         case_sensitive = True
