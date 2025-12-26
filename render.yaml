@@ -1,0 +1,44 @@
+services:
+  # FastAPI Backend Service
+  - type: web
+    name: jiva-plants-api
+    env: python
+    region: oregon  # Choose: oregon, frankfurt, singapore
+    plan: free  # Options: free, starter ($7/mo), standard ($25/mo)
+    branch: main  # Git branch to deploy from
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: ENVIRONMENT
+        value: production
+      - key: SECRET_KEY
+        generateValue: true  # Render will auto-generate a secure secret
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 30
+      - key: CORS_ALLOW_ALL_ORIGINS
+        value: false
+      - key: CORS_ALLOW_CREDENTIALS
+        value: true
+      - key: CORS_MAX_AGE
+        value: 600
+      - key: PROJECT_NAME
+        value: Jiva Plants API
+      - key: VERSION
+        value: 1.0.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: jiva-plants-db
+          property: connectionString
+    autoDeploy: true  # Auto-deploy on git push
+
+databases:
+  # PostgreSQL Database
+  - name: jiva-plants-db
+    databaseName: jiva_plants_prod
+    plan: free  # 90-day expiration, then $7/month for starter
+    region: oregon  # Same region as web service for low latency

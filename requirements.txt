@@ -4,6 +4,7 @@ uvicorn[standard]==0.32.0
 pydantic==2.10.0
 pydantic-settings==2.6.0
 sqlalchemy==2.0.36
+psycopg2-binary==2.9.9  # PostgreSQL adapter for production
 python-multipart==0.0.17
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
