@@ -8,6 +8,7 @@ from huggingface_hub import InferenceClient
 from typing import List, Dict, Optional
 import logging
 import re
+from app.services.coleaf_engine import run_coleaf
 from .disease_mapping import (
     get_diagnosis_info, normalize_label, is_nutrient_deficiency,
     is_fungal_disease, is_bacterial_disease, get_nutrient_type
@@ -28,22 +29,21 @@ llava_client = InferenceClient(
 )
 
 def diagnose_image(image_path: str, top_k: int = 5) -> Dict:
-    """Hybrid diagnosis: MobileNetV2 + LLaVA + Rules"""
-
-    # Parallel processing
+    """Hybrid diagnosis: MobileNetV2 (diseases) + CoLeaf (nutrients)"""
+    # Disease model (PlantVillage)
     disease_results = _run_disease_model(image_path, top_k)
-    # LLaVA temporarily disabled due to deprecated Hugging Face endpoint
-    # TODO: Re-enable when model is migrated to router.huggingface.co
+
+    # Nutrient model (CoLeaf)
+    nutrient_results = run_coleaf(image_path)
+
+    # If LLaVA is still off, keep empty symptom_results
     symptom_results = {"diagnoses": [], "confidence": 0.0}
     # symptom_results = _run_llava_symptom_analysis(image_path)
-    
-    # Combine + prioritize
-    hybrid_diagnosis = _merge_results(disease_results, symptom_results)
-    
-    # Map to your rich DISEASE_MAPPINGS + remedies
-    final_diagnosis = _map_to_knowledge_base(hybrid_diagnosis)
-    
-    return final_diagnosis
+
+    # Combine all
+    all_results = _merge_results_multi(disease_results, nutrient_results, symptom_results)
+
+    return _map_to_knowledge_base(all_results)
 
 def _run_disease_model(image_path: str, top_k: int = 5) -> Dict:
     """Your existing MobileNetV2 logic (diseases)"""
@@ -149,6 +149,13 @@ Format: SYMPTOM: ... | PATTERN: ... | DIAGNOSIS: Iron deficiency"""
             logger.warning("Hugging Face API temporarily unavailable")
 
         return {"diagnoses": [], "confidence": 0.0}
+    
+def _merge_results_multi(*result_dicts: Dict) -> List[Dict]:
+    """Merge multiple result dicts (disease, coleaf, llava) then reuse _merge_results logic."""
+    combined = {"diagnoses": [], "confidence": 0.0}
+    for rd in result_dicts:
+        combined["diagnoses"].extend(rd.get("diagnoses", []))
+    return _merge_results(combined, {"diagnoses": [], "confidence": 0.0})
 
 def _parse_llava_response(text: str) -> Dict:
     """Extract structured diagnosis from LLaVA text"""

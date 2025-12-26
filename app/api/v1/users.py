@@ -3,7 +3,7 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
-from app.api.deps import get_db
+from app.api.deps import get_db, get_current_user
 from app.models import user as user_model
 from app.models.coupon import Coupon
 from app.models.coupon_redemption import CouponRedemption
@@ -44,17 +44,20 @@ class ScanCountRequest(BaseModel):
 
 
 class UpgradeRequest(BaseModel):
+    plan: str  # 'monthly' | 'yearly'
+
+
+class DeviceUpgradeRequest(BaseModel):
     device_id: str
     plan: str  # 'monthly' | 'yearly'
 
 
 class CouponRedeemRequest(BaseModel):
-    device_id: str
     coupon_code: str
 
 
 @router.get("/me", response_model=UserProfile)
-async def get_current_user(db: Session = Depends(get_db)):
+async def get_user_profile(db: Session = Depends(get_db)):
     """Get current user profile"""
     # TODO: Add authentication to get current user ID
     # For now, get the first user or create a test user
@@ -215,12 +218,42 @@ async def update_scan_count(request: ScanCountRequest, db: Session = Depends(get
 
 
 @router.post("/upgrade")
-async def upgrade_to_pro(request: UpgradeRequest, db: Session = Depends(get_db)):
-    """Upgrade a user to pro/premium"""
+async def upgrade_to_pro(
+    request: UpgradeRequest,
+    current_user: user_model.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Upgrade the authenticated user to pro/premium (requires authentication)"""
+
+    # TODO: Integrate with payment provider (Stripe, RevenueCat, etc.)
+    # For now, just upgrade the user
+    current_user.is_premium = True
+    current_user.free_scans_left = -1  # Unlimited
+
+    db.commit()
+    db.refresh(current_user)
+
+    return {
+        "user_id": current_user.id,
+        "email": current_user.email,
+        "is_premium": current_user.is_premium,
+        "plan": request.plan,
+        "message": "Successfully upgraded to Pro!"
+    }
+
+
+@router.post("/upgrade-device")
+async def upgrade_device_to_pro(
+    request: DeviceUpgradeRequest,
+    db: Session = Depends(get_db)
+):
+    """Upgrade a device user to pro/premium (no authentication required, for guest users)"""
+
+    # Find user by device_id
     user = db.query(user_model.User).filter(user_model.User.device_id == request.device_id).first()
 
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="Device user not found")
 
     # TODO: Integrate with payment provider (Stripe, RevenueCat, etc.)
     # For now, just upgrade the user
@@ -240,16 +273,15 @@ async def upgrade_to_pro(request: UpgradeRequest, db: Session = Depends(get_db))
 
 
 @router.post("/redeem-coupon")
-async def redeem_coupon(request: CouponRedeemRequest, db: Session = Depends(get_db)):
-    """Redeem a coupon code to upgrade to premium"""
-    # Get user
-    user = db.query(user_model.User).filter(user_model.User.device_id == request.device_id).first()
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+async def redeem_coupon(
+    request: CouponRedeemRequest,
+    current_user: user_model.User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Redeem a coupon code to upgrade to premium (requires authentication)"""
 
     # Check if user is already premium
-    if user.is_premium:
+    if current_user.is_premium:
         raise HTTPException(status_code=400, detail="User is already premium")
 
     # Get coupon
@@ -275,21 +307,21 @@ async def redeem_coupon(request: CouponRedeemRequest, db: Session = Depends(get_
     # Check if user already redeemed this coupon
     existing_redemption = db.query(CouponRedemption).filter(
         CouponRedemption.coupon_id == coupon.id,
-        CouponRedemption.device_id == request.device_id
+        CouponRedemption.user_id == current_user.id
     ).first()
 
     if existing_redemption:
         raise HTTPException(status_code=400, detail="Coupon already redeemed")
 
     # Redeem coupon
-    user.is_premium = True
-    user.free_scans_left = -1  # Unlimited
+    current_user.is_premium = True
+    current_user.free_scans_left = -1  # Unlimited
 
     # Record redemption
     redemption = CouponRedemption(
         coupon_id=coupon.id,
-        user_id=user.id,
-        device_id=request.device_id
+        user_id=current_user.id,
+        device_id=current_user.device_id if hasattr(current_user, 'device_id') else None
     )
     db.add(redemption)
 
@@ -297,13 +329,13 @@ async def redeem_coupon(request: CouponRedeemRequest, db: Session = Depends(get_
     coupon.current_uses += 1
 
     db.commit()
-    db.refresh(user)
+    db.refresh(current_user)
 
     return {
         "success": True,
-        "user_id": user.id,
-        "device_id": user.device_id,
-        "is_premium": user.is_premium,
+        "user_id": current_user.id,
+        "email": current_user.email,
+        "is_premium": current_user.is_premium,
         "plan_type": coupon.plan_type,
         "message": f"Successfully redeemed coupon! You now have {coupon.plan_type} premium access."
     }

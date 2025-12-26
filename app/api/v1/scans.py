@@ -1,11 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from datetime import datetime
+from pathlib import Path
+import json
 from app.api.deps import get_db, get_current_user
 from app.models import user as user_model
 from app.models.scan import Scan
+from app.services.image_utils import save_image
 
 router = APIRouter()
 
@@ -52,27 +55,54 @@ class ScanResponse(BaseModel):
 
 @router.post("/", response_model=ScanResponse)
 async def create_scan(
-    request: CreateScanRequest,
+    device_id: str = Form(...),
+    mode: str = Form(...),
+    condition_name: str = Form(...),
+    confidence: float = Form(...),
+    diagnosis_data: Optional[str] = Form(None),
+    symptoms: Optional[str] = Form(None),
+    causes: Optional[str] = Form(None),
+    treatment: Optional[str] = Form(None),
+    notes: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
+    severity: Optional[str] = Form(None),
+    health_score: Optional[float] = Form(None),
+    image: Optional[UploadFile] = File(None),
     current_user: user_model.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Save a new scan to the database (requires authentication)"""
+    """Save a new scan to the database with optional image upload (requires authentication)"""
+
+    # Handle image upload if provided
+    image_url = None
+    if image:
+        if not image.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="Invalid image file")
+        image_path = save_image(image)
+        image_url = f"/uploads/{Path(image_path).name}"
+
+    # Parse JSON fields from form data
+    diagnosis_data_dict = json.loads(diagnosis_data) if diagnosis_data else None
+    symptoms_list = json.loads(symptoms) if symptoms else None
+    causes_list = json.loads(causes) if causes else None
+    treatment_list = json.loads(treatment) if treatment else None
+
     # Create scan using authenticated user's ID
     scan = Scan(
         user_id=current_user.id,
-        device_id=request.device_id,
-        mode=request.mode,
-        image_url=request.image_url,
-        condition_name=request.condition_name,
-        confidence=request.confidence,
-        diagnosis_data=request.diagnosis_data,
-        symptoms=request.symptoms,
-        causes=request.causes,
-        treatment=request.treatment,
-        notes=request.notes,
-        category=request.category,
-        severity=request.severity,
-        health_score=request.health_score
+        device_id=device_id,
+        mode=mode,
+        image_url=image_url,
+        condition_name=condition_name,
+        confidence=confidence,
+        diagnosis_data=diagnosis_data_dict,
+        symptoms=symptoms_list,
+        causes=causes_list,
+        treatment=treatment_list,
+        notes=notes,
+        category=category,
+        severity=severity,
+        health_score=health_score
     )
 
     db.add(scan)
@@ -234,6 +264,19 @@ async def delete_scan(
 
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
+
+    # Delete associated image file if it exists
+    if scan.image_url:
+        try:
+            # Extract filename from URL path (e.g., "/uploads/abc123.jpg" -> "abc123.jpg")
+            image_filename = Path(scan.image_url).name
+            image_path = Path("uploads") / image_filename
+
+            if image_path.exists():
+                image_path.unlink()  # Delete the file
+        except Exception as e:
+            # Log error but don't fail the deletion
+            print(f"Warning: Could not delete image file {scan.image_url}: {e}")
 
     db.delete(scan)
     db.commit()
