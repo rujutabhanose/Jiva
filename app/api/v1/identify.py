@@ -6,7 +6,7 @@ import os
 import tempfile
 from sqlalchemy.orm import Session
 
-from app.services.plant_identifier import identify_plant
+from app.services.hybrid_plant_identifier import identify_plant_hybrid
 from app.api.deps import get_db, get_current_user
 from app.models import user as user_model
 
@@ -33,7 +33,10 @@ async def identify(
     current_user: user_model.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Plant identification endpoint (requires authentication, FREE for all users)"""
+    """Plant identification endpoint (requires authentication, FREE for all users)
+
+    Uses hybrid approach: tries both local and cloud models, returns highest confidence.
+    """
 
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Invalid image")
@@ -50,7 +53,8 @@ async def identify(
         with os.fdopen(fd, 'wb') as tmp:
             tmp.write(image_content)
 
-        result_dict = identify_plant(temp_path)
+        # Use hybrid identification (tries both local and cloud models)
+        result_dict = await identify_plant_hybrid(temp_path, region="India")
 
         # Convert the result format from {primary, alternatives} to a list
         # Primary result should be first in the list

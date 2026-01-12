@@ -1,5 +1,6 @@
-from typing import List, Union
+from typing import List, Union, Optional
 from pydantic_settings import BaseSettings
+import os
 
 
 class Settings(BaseSettings):
@@ -13,28 +14,47 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"  # development, staging, production
 
     # CORS - Mobile App Support
-    ALLOWED_ORIGINS: List[str] = [
-        # Web development
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:8080",
+    # NOTE: Cannot use ["*"] with credentials=True (JWT auth requires credentials)
+    # Add your local IP address via EXTRA_ALLOWED_ORIGINS env variable
+    # Example: EXTRA_ALLOWED_ORIGINS=http://192.168.0.121:8000,http://192.168.0.121:8081
+    EXTRA_ALLOWED_ORIGINS: Optional[str] = None
 
-        # Expo development servers
-        "http://localhost:8081",      # Expo Metro bundler
-        "http://localhost:19000",     # Expo DevTools
-        "http://localhost:19006",     # Expo web
+    @property
+    def ALLOWED_ORIGINS(self) -> List[str]:
+        """Build list of allowed origins from defaults + environment variable"""
+        origins = [
+            # Web development
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://localhost:8080",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:8080",
 
-        # Local network for mobile testing (update with your IP)
-        "http://192.168.1.0/24",      # Local network range
-        "exp://localhost:8081",        # Expo Go app
+            # Expo development servers
+            "http://localhost:8081",      # Expo Metro bundler
+            "http://localhost:19000",     # Expo DevTools
+            "http://localhost:19006",     # Expo web
+            "http://127.0.0.1:8081",      # iOS simulator
+            "http://127.0.0.1:19000",
+            "http://127.0.0.1:19006",
 
-        # Mobile simulators/emulators
-        "http://10.0.2.2:8000",       # Android emulator
-        "http://127.0.0.1:8081",      # iOS simulator
-    ]
+            # Mobile emulators
+            "http://10.0.2.2:8000",       # Android emulator
+            "http://10.0.2.2:8081",
+            "http://localhost:8000",      # iOS simulator
+        ]
 
-    # Allow all origins in development (set to False in production)
-    CORS_ALLOW_ALL_ORIGINS: bool = True
+        # Add extra origins from environment variable
+        if self.EXTRA_ALLOWED_ORIGINS:
+            extra = [origin.strip() for origin in self.EXTRA_ALLOWED_ORIGINS.split(',')]
+            origins.extend(extra)
+
+        return origins
+
+    # Deprecated: Cannot use True due to JWT authentication requirements
+    # Kept for backwards compatibility but not used
+    CORS_ALLOW_ALL_ORIGINS: bool = False
 
     # CORS headers
     CORS_ALLOW_CREDENTIALS: bool = True

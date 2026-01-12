@@ -62,6 +62,7 @@ alembic/versions/*.py
 uploads/
 images/
 static/uploads/
+data/
 
 # ML Models Cache
 models/

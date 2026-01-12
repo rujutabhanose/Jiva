@@ -6,6 +6,7 @@ services:
     region: oregon  # Choose: oregon, frankfurt, singapore
     plan: free  # Options: free, starter ($7/mo), standard ($25/mo)
     branch: main  # Git branch to deploy from
+    rootDir: backend  # Backend code is in the backend subdirectory
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: /health

@@ -1,0 +1,39 @@
+{
+  "plants": {
+    "tomato": {
+      "common_diseases": [
+        "early_blight",
+        "late_blight",
+        "septoria_leaf_spot",
+        "bacterial_spot",
+        "leaf_mold",
+        "target_spot"
+      ],
+      "climate": ["temperate", "subtropical"]
+    },
+    "potato": {
+      "common_diseases": ["early_blight", "late_blight", "leaf_spot"],
+      "climate": ["temperate"]
+    }
+  },
+  "treatments": {
+    "early_blight": {
+      "symptoms": ["brown_spots_with_rings", "yellowing"],
+      "actions": [
+        "Remove infected leaves",
+        "Apply copper fungicide",
+        "Ensure airflow"
+      ],
+      "critical": false
+    },
+    "late_blight": {
+      "symptoms": ["water_soaked_spots", "white_mold"],
+      "actions": [
+        "Remove plant immediately",
+        "Apply mancozeb",
+        "Isolate from other plants"
+      ],
+      "critical": true
+    }
+  }
+}

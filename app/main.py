@@ -76,28 +76,17 @@ app = FastAPI(
 )
 
 # CORS middleware configuration for mobile app support
-if settings.CORS_ALLOW_ALL_ORIGINS and settings.ENVIRONMENT == "development":
-    # Allow all origins in development for easier mobile testing
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,  # Must be False when allow_origins is ["*"]
-        allow_methods=settings.CORS_ALLOW_METHODS,
-        allow_headers=settings.CORS_ALLOW_HEADERS,
-        expose_headers=settings.CORS_EXPOSE_HEADERS,
-        max_age=settings.CORS_MAX_AGE,
-    )
-else:
-    # Production: Use specific origins
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.ALLOWED_ORIGINS,
-        allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
-        allow_methods=settings.CORS_ALLOW_METHODS,
-        allow_headers=settings.CORS_ALLOW_HEADERS,
-        expose_headers=settings.CORS_EXPOSE_HEADERS,
-        max_age=settings.CORS_MAX_AGE,
-    )
+# Always use specific origins with credentials enabled to support JWT authentication
+# Cannot use allow_origins=["*"] with allow_credentials=True (CORS spec violation)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+    allow_methods=settings.CORS_ALLOW_METHODS,
+    allow_headers=settings.CORS_ALLOW_HEADERS,
+    expose_headers=settings.CORS_EXPOSE_HEADERS,
+    max_age=settings.CORS_MAX_AGE,
+)
 
 # Include API router
 app.include_router(api_router, prefix="/api/v1")
