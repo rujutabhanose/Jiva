@@ -24,6 +24,7 @@ class UserProfile(BaseModel):
     created_at: str
     is_premium: bool = False
     free_scans_left: int = 1
+    scans_used: int = 0
 
 
 class UpdateProfileRequest(BaseModel):
@@ -34,21 +35,7 @@ class UpdateProfileRequest(BaseModel):
     plantTypes: Optional[List[str]] = None
 
 
-class DeviceUserRequest(BaseModel):
-    device_id: str
-
-
-class ScanCountRequest(BaseModel):
-    device_id: str
-    scan_count: int
-
-
 class UpgradeRequest(BaseModel):
-    plan: str  # 'monthly' | 'yearly'
-
-
-class DeviceUpgradeRequest(BaseModel):
-    device_id: str
     plan: str  # 'monthly' | 'yearly'
 
 
@@ -57,23 +44,16 @@ class CouponRedeemRequest(BaseModel):
 
 
 @router.get("/me", response_model=UserProfile)
-async def get_user_profile(db: Session = Depends(get_db)):
+async def get_user_profile(
+    db: Session = Depends(get_db),
+    email: str = Depends(get_current_user_email)
+):
     """Get current user profile"""
-    # TODO: Add authentication to get current user ID
-    # For now, get the first user or create a test user
-    user = db.query(user_model.User).first()
+    # Get current user from email (from JWT token)
+    user = db.query(user_model.User).filter(user_model.User.email == email).first()
 
     if not user:
-        # Create a test user if none exists
-        user = user_model.User(
-            email="test@example.com",
-            hashed_password="not_implemented",
-            name="Test User",
-            free_scans_left=1
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        raise HTTPException(status_code=404, detail="User not found")
 
     return {
         "id": user.id,
@@ -85,15 +65,20 @@ async def get_user_profile(db: Session = Depends(get_db)):
         "onboardingCompleted": bool(user.user_type or user.plant_types),
         "created_at": user.created_at.isoformat(),
         "is_premium": user.is_premium,
-        "free_scans_left": user.free_scans_left
+        "free_scans_left": user.free_scans_left,
+        "scans_used": user.scans_used
     }
 
 
 @router.put("/me", response_model=UserProfile)
-async def update_profile(request: UpdateProfileRequest, db: Session = Depends(get_db)):
+async def update_profile(
+    request: UpdateProfileRequest,
+    db: Session = Depends(get_db),
+    email: str = Depends(get_current_user_email)
+):
     """Update user profile"""
-    # TODO: Add authentication to get current user ID
-    user = db.query(user_model.User).first()
+    # Get current user from email (from JWT token)
+    user = db.query(user_model.User).filter(user_model.User.email == email).first()
 
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -123,7 +108,8 @@ async def update_profile(request: UpdateProfileRequest, db: Session = Depends(ge
         "onboardingCompleted": bool(user.user_type or user.plant_types),
         "created_at": user.created_at.isoformat(),
         "is_premium": user.is_premium,
-        "free_scans_left": user.free_scans_left
+        "free_scans_left": user.free_scans_left,
+        "scans_used": user.scans_used
     }
 
 
@@ -156,67 +142,6 @@ async def delete_account(
     return {"message": "Account deleted successfully"}
 
 
-@router.post("/device")
-async def get_or_create_device_user(request: DeviceUserRequest, db: Session = Depends(get_db)):
-    """Get or create a user by device ID (for guest users)"""
-    # Check if user exists with this device_id
-    user = db.query(user_model.User).filter(user_model.User.device_id == request.device_id).first()
-
-    if not user:
-        # Create a new guest user
-        user = user_model.User(
-            device_id=request.device_id,
-            name=f"Guest User",
-            free_scans_left=1,
-            scans_used=0,
-            is_premium=False
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        print(f"[DEBUG] Created new device user {user.id} with is_premium={user.is_premium}")
-    else:
-        print(f"[DEBUG] Found existing device user {user.id} with is_premium={user.is_premium}")
-
-    response_data = {
-        "user_id": user.id,
-        "device_id": user.device_id,
-        "is_premium": user.is_premium,
-        "free_scans_left": user.free_scans_left,
-        "scans_used": user.scans_used,
-        "scans_limit": 999999 if user.is_premium else 1  # Use large number instead of infinity for JSON compatibility
-    }
-    print(f"[DEBUG] Returning device user data: is_premium={response_data['is_premium']}")
-
-    return response_data
-
-
-@router.post("/scan-count")
-async def update_scan_count(request: ScanCountRequest, db: Session = Depends(get_db)):
-    """Update scan count for a device user"""
-    user = db.query(user_model.User).filter(user_model.User.device_id == request.device_id).first()
-
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    # Update scan counts
-    user.scans_used = request.scan_count
-
-    if not user.is_premium:
-        user.free_scans_left = max(0, 1 - request.scan_count)
-
-    db.commit()
-    db.refresh(user)
-
-    return {
-        "user_id": user.id,
-        "device_id": user.device_id,
-        "is_premium": user.is_premium,
-        "free_scans_left": user.free_scans_left,
-        "scans_used": user.scans_used
-    }
-
-
 @router.post("/upgrade")
 async def upgrade_to_pro(
     request: UpgradeRequest,
@@ -242,33 +167,31 @@ async def upgrade_to_pro(
     }
 
 
-@router.post("/upgrade-device")
-async def upgrade_device_to_pro(
-    request: DeviceUpgradeRequest,
+@router.post("/cancel-subscription")
+async def cancel_subscription(
+    current_user: user_model.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Upgrade a device user to pro/premium (no authentication required, for guest users)"""
+    """Cancel the authenticated user's pro subscription (requires authentication)"""
 
-    # Find user by device_id
-    user = db.query(user_model.User).filter(user_model.User.device_id == request.device_id).first()
+    if not current_user.is_premium:
+        raise HTTPException(status_code=400, detail="User does not have an active subscription")
 
-    if not user:
-        raise HTTPException(status_code=404, detail="Device user not found")
-
-    # TODO: Integrate with payment provider (Stripe, RevenueCat, etc.)
-    # For now, just upgrade the user
-    user.is_premium = True
-    user.free_scans_left = -1  # Unlimited
+    # TODO: Integrate with payment provider (Stripe, RevenueCat, etc.) to cancel actual subscription
+    # For now, just downgrade the user
+    current_user.is_premium = False
+    current_user.free_scans_left = max(0, 1 - current_user.scans_used)  # Reset to free tier limit
 
     db.commit()
-    db.refresh(user)
+    db.refresh(current_user)
 
     return {
-        "user_id": user.id,
-        "device_id": user.device_id,
-        "is_premium": user.is_premium,
-        "plan": request.plan,
-        "message": "Successfully upgraded to Pro!"
+        "user_id": current_user.id,
+        "email": current_user.email,
+        "is_premium": current_user.is_premium,
+        "free_scans_left": current_user.free_scans_left,
+        "scans_used": current_user.scans_used,
+        "message": "Subscription cancelled successfully"
     }
 
 
@@ -376,17 +299,7 @@ async def validate_coupon(request: CouponRedeemRequest, db: Session = Depends(ge
             "message": "Coupon has reached maximum uses"
         }
 
-    # Check if already redeemed by this device
-    existing_redemption = db.query(CouponRedemption).filter(
-        CouponRedemption.coupon_id == coupon.id,
-        CouponRedemption.device_id == request.device_id
-    ).first()
-
-    if existing_redemption:
-        return {
-            "valid": False,
-            "message": "Coupon already redeemed"
-        }
+    # Note: Per-user redemption check happens in redeem-coupon endpoint (requires auth)
 
     return {
         "valid": True,

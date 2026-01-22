@@ -2,8 +2,9 @@
 """
 CoLeaf nutrient deficiency classifier integration.
 
-Uses TensorFlow/Keras model:
-  backend/models/coleaf_classifier_final.h5
+Uses TensorFlow/Keras model with versioning support:
+  - Active version loaded via ModelManager
+  - Fallback to baseline: backend/models/coleaf_production_v2.keras
 
 Config:
   backend/models/class_mapping.json
@@ -17,6 +18,7 @@ Output is compatible with diagnosis_engine._merge_results():
         "label": "nitrogen_deficiency",
         "confidence": 0.93,
         "category": "nutrient_deficiency",
+        "model_version_id": 1,
       }
     ],
     "confidence": 0.93,
@@ -24,15 +26,21 @@ Output is compatible with diagnosis_engine._merge_results():
 """
 
 import json
+import logging
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import numpy as np
 from PIL import Image
 
 # Use standard TensorFlow/Keras (model saved with Functional API in Keras 3.x)
 import tensorflow as tf
+from tensorflow import keras
 
+from app.services.model_manager import model_manager
+from app.services.custom_losses import FocalLoss
+
+logger = logging.getLogger(__name__)
 
 # Paths
 BASE_DIR = Path(__file__).resolve().parents[2]   # .../backend
@@ -70,16 +78,44 @@ NUTRIENT_TO_LABEL: Dict[str, str] = {
 }
 
 
-# Load Keras model once at import
+# Fallback: Load Keras model once at import (used if model_manager not initialized)
+coleaf_model = None
 try:
     # Use standard TensorFlow Keras loading for the new production model
-    coleaf_model = tf.keras.models.load_model(MODEL_FILE)
-    import logging
-    logging.info(f"✓ CoLeaf model loaded successfully: {len(CLASS_NAMES)} classes")
+    # Pass custom_objects for FocalLoss used during training
+    coleaf_model = tf.keras.models.load_model(
+        MODEL_FILE,
+        custom_objects={'FocalLoss': FocalLoss}
+    )
+    logger.info(f"CoLeaf baseline model loaded: {len(CLASS_NAMES)} classes")
 except Exception as e:
-    import logging
-    logging.error(f"Failed to load CoLeaf model: {e}")
-    coleaf_model = None
+    logger.error(f"Failed to load CoLeaf baseline model: {e}")
+
+
+def _get_model() -> Optional[Any]:
+    """
+    Get the active CoLeaf model from model manager or fallback.
+
+    Returns:
+        Loaded Keras model or None
+    """
+    # Try model manager first (for versioned models)
+    managed_model = model_manager.get_model("coleaf")
+    if managed_model is not None:
+        return managed_model
+
+    # Fallback to baseline model
+    return coleaf_model
+
+
+def get_model_version_id() -> Optional[int]:
+    """
+    Get the current model version ID.
+
+    Returns:
+        Model version ID or None if using baseline
+    """
+    return model_manager.get_model_version_id("coleaf")
 
 
 def _preprocess_image(image_path: str) -> np.ndarray:
@@ -98,14 +134,16 @@ def run_coleaf(image_path: str) -> Dict[str, Any]:
 
     Returns empty result if model failed to load.
     """
+    # Get model (from manager or fallback)
+    model = _get_model()
+
     # Return empty result if model failed to load
-    if coleaf_model is None:
-        import logging
-        logging.warning("CoLeaf model not loaded - skipping nutrient deficiency detection")
-        return {"diagnoses": [], "confidence": 0.0}
+    if model is None:
+        logger.warning("CoLeaf model not loaded - skipping nutrient deficiency detection")
+        return {"diagnoses": [], "confidence": 0.0, "model_version_id": None}
 
     x = _preprocess_image(image_path)
-    preds = coleaf_model.predict(x, verbose=0)[0]  # (num_classes,)
+    preds = model.predict(x, verbose=0)[0]  # (num_classes,)
 
     idx = int(np.argmax(preds))
     conf = float(preds[idx])
@@ -118,6 +156,9 @@ def run_coleaf(image_path: str) -> Dict[str, Any]:
         label = NUTRIENT_TO_LABEL.get(cls, "general_nutrient_deficiency")
         category = "nutrient_deficiency"
 
+    # Get model version for tracking
+    model_version_id = get_model_version_id()
+
     return {
         "diagnoses": [
             {
@@ -126,7 +167,9 @@ def run_coleaf(image_path: str) -> Dict[str, Any]:
                 "label": label,        # must exist in DISEASE_MAPPINGS
                 "confidence": conf,
                 "category": category,
+                "model_version_id": model_version_id,
             }
         ],
         "confidence": conf,
+        "model_version_id": model_version_id,
     }

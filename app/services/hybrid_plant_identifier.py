@@ -47,6 +47,19 @@ class HybridPlantIdentifier:
         except Exception as e:
             logger.warning(f"⚠️  Cloud model not available: {e}")
 
+    def _check_local_model(self):
+        """Re-check local model availability (handles late loading)."""
+        if not self.local_available:
+            try:
+                from app.services.plant_identifier import identify_plant as local_identify
+                from app.services.plant_identifier import processor, model
+                if processor is not None and model is not None:
+                    self.local_identify = local_identify
+                    self.local_available = True
+                    logger.info("✅ Local plant identification model now available")
+            except Exception:
+                pass
+
     async def identify(self, image_path: str, top_k: int = 3, region: str = "India") -> Dict:
         """
         Identify plant using hybrid approach.
@@ -67,7 +80,9 @@ class HybridPlantIdentifier:
                 }
             }
         """
-        results = {}
+        # Re-check local model in case it was loaded after init
+        self._check_local_model()
+
         local_result = None
         cloud_result = None
 
@@ -118,6 +133,7 @@ class HybridPlantIdentifier:
             return {
                 "species": primary.get("commonName") or primary.get("scientificName"),
                 "scientific_name": primary.get("scientificName"),
+                "family": primary.get("family"),
                 "confidence": primary["confidence"] / 100 if primary["confidence"] > 1 else primary["confidence"],
                 "alternatives": result.get("alternatives", []),
                 "source": "local"
@@ -197,6 +213,7 @@ class HybridPlantIdentifier:
             "primary": {
                 "commonName": chosen["species"],
                 "scientificName": chosen.get("scientific_name", chosen["species"]),
+                "family": chosen.get("family"),
                 "confidence": chosen["confidence"] * 100,  # Convert to percentage
                 "source": chosen["source"]
             },

@@ -1,6 +1,10 @@
 """
 Hybrid Plant Diagnosis Engine v2.0
 Combines MobileNetV2 (diseases) + LLaVA (symptoms/nutrients) + Rule heuristics
+
+With continuous learning support:
+- Tracks model versions for each prediction
+- Results include model_version_id for feedback correlation
 """
 
 from transformers import pipeline
@@ -8,11 +12,13 @@ from huggingface_hub import InferenceClient
 from typing import List, Dict, Optional
 import logging
 import re
-from app.services.coleaf_engine import run_coleaf
+import asyncio
+from app.services.coleaf_engine import run_coleaf, get_model_version_id as get_coleaf_version
 from .disease_mapping import (
     get_diagnosis_info, normalize_label, is_nutrient_deficiency,
     is_fungal_disease, is_bacterial_disease, get_nutrient_type
 )
+from .hybrid_plant_identifier import identify_plant_hybrid
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +34,38 @@ llava_client = InferenceClient(
     model="YuchengShi/LLaVA-v1.5-7B-Plant-Leaf-Diseases-Detection"
 )
 
+from app.services.quality_gate import image_quality_check
+
+
+def _identify_plant(image_path: str) -> Optional[str]:
+    """Identify the plant species from the image."""
+    try:
+        # Run async function in sync context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(identify_plant_hybrid(image_path))
+            if result and result.get("primary"):
+                plant_name = result["primary"].get("commonName") or result["primary"].get("scientificName")
+                logger.info(f"Plant identified: {plant_name} (confidence: {result['primary'].get('confidence', 0):.1f}%)")
+                return plant_name
+        finally:
+            loop.close()
+    except Exception as e:
+        logger.warning(f"Plant identification failed: {e}. Continuing with diagnosis only.")
+    return None
+
+
 def diagnose_image(image_path: str, top_k: int = 5) -> Dict:
-    """Hybrid diagnosis: MobileNetV2 (diseases) + CoLeaf (nutrients)"""
+    if not image_quality_check(image_path):
+        return {
+            "success": False,
+            "reason": "Image too blurry or unclear. Please take a closer photo of a leaf.",
+            "diagnoses": [],
+            "plant_health_score": None,
+            "plant_name": None
+        }
+    """Hybrid diagnosis: MobileNetV2 (diseases) + CoLeaf (nutrients) + Plant Identification"""
     # Disease model (PlantVillage)
     disease_results = _run_disease_model(image_path, top_k)
 
@@ -40,10 +76,15 @@ def diagnose_image(image_path: str, top_k: int = 5) -> Dict:
     symptom_results = {"diagnoses": [], "confidence": 0.0}
     # symptom_results = _run_llava_symptom_analysis(image_path)
 
+    # Plant identification - run async in sync context
+    plant_name = _identify_plant(image_path)
+
     # Combine all
     all_results = _merge_results_multi(disease_results, nutrient_results, symptom_results)
 
-    return _map_to_knowledge_base(all_results)
+    result = _map_to_knowledge_base(all_results)
+    result["plant_name"] = plant_name
+    return result
 
 def _run_disease_model(image_path: str, top_k: int = 5) -> Dict:
     """Your existing MobileNetV2 logic (diseases)"""
@@ -224,7 +265,8 @@ def _map_to_knowledge_base(hybrid_results: List[Dict]) -> Dict:
                 "Ensure adequate light exposure",
                 "Monitor for any changes in appearance"
             ],
-            "ai_sources_used": []
+            "ai_sources_used": [],
+            "plant_name": None
         }
 
     diagnoses = []
@@ -262,12 +304,19 @@ def _map_to_knowledge_base(hybrid_results: List[Dict]) -> Dict:
                 "Focus on affected leaves or problem areas",
                 "Consult a local plant expert if issues persist"
             ],
-            "ai_sources_used": [d.get("source", "unknown") for d in hybrid_results]
+            "ai_sources_used": [d.get("source", "unknown") for d in hybrid_results],
+            "plant_name": None
         }
 
     # Your existing logic for health score + recommendations
     health_score = _calculate_health_score(diagnoses)
     recommendations = _generate_recommendations(diagnoses)
+
+    # Get model version IDs for tracking
+    model_versions = {}
+    coleaf_version = get_coleaf_version()
+    if coleaf_version:
+        model_versions["coleaf"] = coleaf_version
 
     return {
         "success": True,
@@ -276,7 +325,9 @@ def _map_to_knowledge_base(hybrid_results: List[Dict]) -> Dict:
         "all_diagnoses": diagnoses,
         "diagnoses": diagnoses,  # For frontend compatibility
         "recommendations": recommendations,
-        "ai_sources_used": list(set([d.get("source", "unknown") for d in diagnoses]))
+        "ai_sources_used": list(set([d.get("source", "unknown") for d in diagnoses])),
+        "plant_name": None,  # Will be set by diagnose_image after identification
+        "model_versions": model_versions,  # For continuous learning tracking
     }
 
 def _assess_severity(confidence: float, info=None) -> str:

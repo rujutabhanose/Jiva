@@ -78,43 +78,27 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
 
 @router.post("/register", response_model=TokenResponse)
 async def register(request: RegisterRequest, db: Session = Depends(get_db)):
+    """Register a new user. All users start with 1 free diagnosis scan."""
 
     existing_user = db.query(User).filter(User.email == request.email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    device_user = None
-    if request.device_id:
-        device_user = db.query(User).filter(User.device_id == request.device_id).first()
-
-    if device_user:
-        device_user.email = request.email
-        device_user.hashed_password = hash_password(request.password)
-        device_user.name = request.name
-        device_user.country = request.country
-        device_user.user_type = request.userType
-        device_user.plant_types = request.plantTypes
-        device_user.platform = request.platform
-        device_user.is_verified = True
-
-        db.commit()
-        db.refresh(device_user)
-        user = device_user
-    else:
-        user = User(
-            email=request.email,
-            hashed_password=hash_password(request.password),
-            name=request.name,
-            country=request.country,
-            user_type=request.userType,
-            plant_types=request.plantTypes,
-            device_id=request.device_id,
-            platform=request.platform,
-            is_verified=True,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+    # Create new user - starts with 1 free scan (free_scans_left defaults to 1)
+    user = User(
+        email=request.email,
+        hashed_password=hash_password(request.password),
+        name=request.name,
+        country=request.country,
+        user_type=request.userType,
+        plant_types=request.plantTypes,
+        device_id=request.device_id,  # Keep for analytics
+        platform=request.platform,
+        is_verified=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
 
     # Create access token
     access_token = create_access_token(subject=user.email)

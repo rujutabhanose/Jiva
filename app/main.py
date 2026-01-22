@@ -7,7 +7,10 @@ import warnings
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.db.init_db import init_db
+from app.db.session import SessionLocal
 from app.services.image_utils import cleanup_old_images, UPLOAD_DIR
+from app.services.model_manager import model_manager
+from app.services.model_scheduler import init_scheduler, shutdown_scheduler
 
 # Suppress bcrypt version warning (harmless compatibility message)
 warnings.filterwarnings("ignore", message=".*bcrypt.*")
@@ -57,7 +60,29 @@ async def lifespan(app: FastAPI):
     # Startup: Launch background cleanup task
     cleanup_task = asyncio.create_task(cleanup_images_periodically())
 
+    # Startup: Initialize Model Manager for continuous learning
+    print("Loading model versions...")
+    try:
+        db = SessionLocal()
+        model_manager.initialize(db)
+        db.close()
+        print("Model manager initialized successfully")
+    except Exception as e:
+        print(f"Warning: Failed to initialize model manager: {e}")
+
+    # Startup: Initialize training scheduler (weekly retraining)
+    print("Initializing training scheduler...")
+    try:
+        init_scheduler()
+        print("Training scheduler initialized (weekly on Sundays at 2:00 AM UTC)")
+    except Exception as e:
+        print(f"Warning: Failed to initialize scheduler: {e}")
+
     yield
+
+    # Shutdown: Stop training scheduler
+    print("Shutting down training scheduler...")
+    shutdown_scheduler()
 
     # Shutdown: Cancel background tasks
     cleanup_task.cancel()
@@ -65,7 +90,7 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
-    print("👋 Shutting down...")
+    print("Shutting down...")
 
 
 app = FastAPI(

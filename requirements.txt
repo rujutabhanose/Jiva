@@ -27,6 +27,11 @@ numpy>=2.1.0  # Required by TensorFlow
 # Environment
 python-dotenv==1.0.1
 
+# Continuous Learning
+apscheduler==3.10.4  # Scheduled model retraining
+httpx==0.27.0  # Async HTTP for Supabase storage
+scikit-learn==1.5.2  # Train/test split, metrics
+
 # Dev tools
 pytest==8.3.4
 black==24.10.0

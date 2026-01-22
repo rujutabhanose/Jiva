@@ -8,7 +8,6 @@ Coverage: ~10,000 plant species globally
 import json
 from pathlib import Path
 from typing import List, Dict
-from PIL import Image
 from huggingface_hub import InferenceClient
 
 # HuggingFace model
@@ -17,9 +16,12 @@ HF_TOKEN = None  # Optional: set HUGGINGFACE_TOKEN env var for higher rate limit
 
 class PlantIdentifier:
     """Identifies plant species from leaf/flower images."""
-    
+
     def __init__(self):
-        self.client = InferenceClient(model=MODEL_NAME)
+        # Use new router endpoint (api-inference.huggingface.co is deprecated)
+        self.client = InferenceClient(
+            model=f"https://router.huggingface.co/hf-inference/models/{MODEL_NAME}"
+        )
 
         # Load plant knowledge base (try both .json and no extension)
         kb_path = Path(__file__).parent / "plant_knowledge_base.json"
@@ -57,11 +59,8 @@ class PlantIdentifier:
         }
         """
         
-        # Read image
-        img = Image.open(image_path).convert("RGB")
-        
-        # Get predictions
-        predictions = self.client.image_classification(image=img)
+        # Get predictions (pass file path directly - InferenceClient expects path, URL, or binary)
+        predictions = self.client.image_classification(image=image_path)
         
         # Extract top predictions
         top_preds = predictions[:top_k]

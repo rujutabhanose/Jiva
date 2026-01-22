@@ -69,6 +69,13 @@ models/
 *.pth
 *.pt
 *.safetensors
+*.keras
+*.h5
+*.tflite
+*.onnx
+*.pkl
+checkpoints/
+checkpoints_disease_only/
 .cache/
 huggingface/
 transformers_cache/

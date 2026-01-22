@@ -78,6 +78,16 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+    # Supabase Storage (for training data - FREE tier: 1GB)
+    SUPABASE_URL: Optional[str] = None  # e.g., "https://xxxxx.supabase.co"
+    SUPABASE_KEY: Optional[str] = None  # Service role key for server-side operations
+    SUPABASE_BUCKET: str = "training-data"  # Bucket name for training images
+
+    # Continuous Learning Configuration
+    MIN_TRAINING_SAMPLES: int = 50  # Minimum samples before retraining
+    TRAINING_VALIDATION_SPLIT: float = 0.2  # 20% holdout for validation
+    MAX_ACCURACY_DROP: float = 0.05  # Auto-rollback if accuracy drops > 5%
+
     class Config:
         env_file = ".env"
         case_sensitive = True

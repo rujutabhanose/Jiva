@@ -1,12 +1,13 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import logging
 import os
 import tempfile
 from sqlalchemy.orm import Session
 
 from app.services.hybrid_plant_identifier import identify_plant_hybrid
+from app.services.quality_gate import image_quality_check
 from app.api.deps import get_db, get_current_user
 from app.models import user as user_model
 
@@ -16,6 +17,8 @@ router = APIRouter()
 
 class PlantIdentification(BaseModel):
     plant_name: str
+    scientific_name: Optional[str] = None
+    family: Optional[str] = None
     confidence: float
     confidence_percent: float
 
@@ -25,6 +28,7 @@ class IdentifyResponse(BaseModel):
     results: List[PlantIdentification]
     free_scans_left: int
     is_premium: bool
+    reason: Optional[str] = None
 
 
 @router.post("/", response_model=IdentifyResponse)
@@ -53,17 +57,36 @@ async def identify(
         with os.fdopen(fd, 'wb') as tmp:
             tmp.write(image_content)
 
+        # Quality gate check
+        if not image_quality_check(temp_path):
+            return {
+                "success": False,
+                "results": [],
+                "free_scans_left": current_user.free_scans_left,
+                "is_premium": current_user.is_premium,
+                "reason": "Image too blurry or unclear. Please take a closer, clearer photo of the leaf."
+            }
+
         # Use hybrid identification (tries both local and cloud models)
-        result_dict = await identify_plant_hybrid(temp_path, region="India")
+        try:
+            result_dict = await identify_plant_hybrid(temp_path, region="India")
+        except RuntimeError as e:
+            logger.error(f"Plant identification failed: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Plant identification service temporarily unavailable. Please try again later."
+            )
 
         # Convert the result format from {primary, alternatives} to a list
         # Primary result should be first in the list
         primary = result_dict["primary"]
         alternatives = result_dict.get("alternatives", [])
 
-        # Format primary result
+        # Format primary result with USDA enrichment data
         results = [{
             "plant_name": primary.get("commonName") or primary.get("scientificName"),
+            "scientific_name": primary.get("scientificName"),
+            "family": primary.get("family"),
             "confidence": primary["confidence"] / 100 if primary["confidence"] > 1 else primary["confidence"],
             "confidence_percent": primary["confidence"] if primary["confidence"] > 1 else primary["confidence"] * 100
         }]
