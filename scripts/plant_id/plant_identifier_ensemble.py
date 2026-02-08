@@ -13,7 +13,13 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-from image_processor_advanced import PlantImagePreprocessor
+try:
+    from scripts.utilities.image_processor_advanced import PlantImagePreprocessor
+except ImportError:
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from utilities.image_processor_advanced import PlantImagePreprocessor
 
 class EnsemblePlantIdentifier:
     """

@@ -46,8 +46,13 @@ def test_single_model():
 
 def test_ensemble_model():
     """Test new ensemble approach"""
-    from plant_identifier_ensemble import EnsemblePlantIdentifier
-    from plant_id_postprocessor import PlantIdentificationPostProcessor
+    try:
+        from scripts.plant_id.plant_identifier_ensemble import EnsemblePlantIdentifier
+        from scripts.plant_id.plant_id_postprocessor import PlantIdentificationPostProcessor
+    except ImportError:
+        sys.path.insert(0, str(Path(__file__).parent.parent / "plant_id"))
+        from plant_identifier_ensemble import EnsemblePlantIdentifier
+        from plant_id_postprocessor import PlantIdentificationPostProcessor
 
     print("\n[TEST 2] Ensemble Model (Enhanced)")
     print("-" * 50)

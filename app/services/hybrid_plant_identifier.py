@@ -35,12 +35,12 @@ class HybridPlantIdentifier:
         try:
             import sys
             from pathlib import Path
-            # Add backend/backend to path to import the cloud identifier
-            backend_path = Path(__file__).parent.parent.parent / "backend"
+            # Add backend root to path to import the cloud identifier
+            backend_path = Path(__file__).parent.parent.parent
             if str(backend_path) not in sys.path:
                 sys.path.insert(0, str(backend_path))
 
-            from plant_identifier import identifier as cloud_identifier
+            from scripts.plant_id.plant_identifier import identifier as cloud_identifier
             self.cloud_identifier = cloud_identifier
             self.cloud_available = True
             logger.info("✅ Cloud plant identification (InferenceClient) available")

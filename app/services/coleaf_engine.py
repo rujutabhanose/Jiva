@@ -7,7 +7,7 @@ Uses TensorFlow/Keras model with versioning support:
   - Fallback to baseline: backend/models/coleaf_production_v2.keras
 
 Config:
-  backend/models/class_mapping.json
+  backend/models/class_indices.json
 
 Output is compatible with diagnosis_engine._merge_results():
   {

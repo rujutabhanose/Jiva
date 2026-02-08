@@ -40,19 +40,31 @@ from app.services.quality_gate import image_quality_check
 def _identify_plant(image_path: str) -> Optional[str]:
     """Identify the plant species from the image."""
     try:
-        # Run async function in sync context
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(identify_plant_hybrid(image_path))
-            if result and result.get("primary"):
-                plant_name = result["primary"].get("commonName") or result["primary"].get("scientificName")
-                logger.info(f"Plant identified: {plant_name} (confidence: {result['primary'].get('confidence', 0):.1f}%)")
-                return plant_name
-        finally:
-            loop.close()
+        # identify_plant_hybrid is async; run it without interfering with any
+        # existing event loop. We execute asyncio.run in a separate thread so
+        # it never collides with uvicorn/asyncio main loop. Apply a short
+        # timeout so slow cloud calls don't block the request for too long.
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FUTEX
+
+        def _run():
+            return asyncio.run(identify_plant_hybrid(image_path))
+
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            future = ex.submit(_run)
+            try:
+                result = future.result(timeout=6)  # seconds
+            except FUTEX:
+                logger.warning("Plant identification timed out (6s). Continuing without plant name.")
+                return None
+
+        if result and result.get("primary"):
+            plant_name = result["primary"].get("commonName") or result["primary"].get("scientificName")
+            logger.info(f"Plant identified: {plant_name} (confidence: {result['primary'].get('confidence', 0):.1f}%)")
+            return plant_name
+
     except Exception as e:
         logger.warning(f"Plant identification failed: {e}. Continuing with diagnosis only.")
+
     return None
 
 
@@ -107,18 +119,40 @@ def _run_disease_model(image_path: str, top_k: int = 5) -> Dict:
 
         diagnoses = []
         for pred in predictions:
-            diagnosis_info = get_diagnosis_info(pred['label'])
+            raw_label = pred.get('label', '')
+            # First try normalized mapping
+            diagnosis_info = get_diagnosis_info(raw_label)
+
+            # Fallback: extract disease substring (e.g. "Bell Pepper with Bacterial Spot" -> "Bacterial Spot")
+            if diagnosis_info is None:
+                try:
+                    lower = raw_label.lower()
+                    disease_part = None
+                    if ' with ' in lower:
+                        disease_part = raw_label.split(' with ', 1)[1]
+                    elif ' of ' in lower:
+                        disease_part = raw_label.split(' of ', 1)[1]
+                    elif 'healthy' in lower:
+                        disease_part = 'healthy'
+
+                    if disease_part:
+                        diagnosis_info = get_diagnosis_info(disease_part)
+                        if diagnosis_info:
+                            logger.info(f"Mapped MobileNet label '{raw_label}' -> '{disease_part}'")
+                except Exception:
+                    diagnosis_info = None
+
             if diagnosis_info:
                 diagnoses.append({
                     "source": "mobilenet",
-                    "label": pred['label'],
+                    "label": normalize_label(raw_label),
                     "confidence": pred['score'],
                     "category": diagnosis_info.category,
                     "subcategory": diagnosis_info.subcategory,
                     "info": diagnosis_info
                 })
             else:
-                logger.warning(f"No mapping found for MobileNet label: {pred['label']}")
+                logger.warning(f"No mapping found for MobileNet label: {raw_label}")
 
         if not diagnoses:
             logger.warning("All MobileNet predictions failed to map to disease database")

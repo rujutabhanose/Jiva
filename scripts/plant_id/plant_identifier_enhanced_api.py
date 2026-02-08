@@ -9,8 +9,12 @@ from pathlib import Path
 import os
 import shutil
 
-from plant_identifier_ensemble import EnsemblePlantIdentifier
-from plant_id_postprocessor import PlantIdentificationPostProcessor
+try:
+    from scripts.plant_id.plant_identifier_ensemble import EnsemblePlantIdentifier
+    from scripts.plant_id.plant_id_postprocessor import PlantIdentificationPostProcessor
+except ImportError:
+    from plant_identifier_ensemble import EnsemblePlantIdentifier
+    from plant_id_postprocessor import PlantIdentificationPostProcessor
 
 # Initialize models (lazy loading)
 identifier = None

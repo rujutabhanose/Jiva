@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+    # Email (Resend)
+    # Get your API key from https://resend.com/api-keys
+    RESEND_API_KEY: Optional[str] = "re_KZepRifa_Jii41rMftyRTiBKTcCXMVSyU"
+    # For testing: use "onboarding@resend.dev" (works immediately, no domain verification needed)
+    # For production: change to "noreply@jivaplants.com" after domain is verified at https://resend.com/domains
+    EMAIL_FROM: str = "Jiva Plants <noreply@jivaplants.com>"
+
     # Supabase Storage (for training data - FREE tier: 1GB)
     SUPABASE_URL: Optional[str] = None  # e.g., "https://xxxxx.supabase.co"
     SUPABASE_KEY: Optional[str] = None  # Service role key for server-side operations
@@ -87,6 +94,12 @@ class Settings(BaseSettings):
     MIN_TRAINING_SAMPLES: int = 50  # Minimum samples before retraining
     TRAINING_VALIDATION_SPLIT: float = 0.2  # 20% holdout for validation
     MAX_ACCURACY_DROP: float = 0.05  # Auto-rollback if accuracy drops > 5%
+
+    # HuggingFace Configuration
+    # Token for accessing gated models (juppy44/plant-identification-2m-vit-b)
+    # Must have "Make calls to serverless Inference API" permission
+    # Get your token from: https://huggingface.co/settings/tokens
+    HUGGINGFACE_TOKEN: Optional[str] = None
 
     class Config:
         env_file = ".env"

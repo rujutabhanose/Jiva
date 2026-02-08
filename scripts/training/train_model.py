@@ -16,7 +16,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from datetime import datetime
 
-from model_architecture import create_model
+try:
+    from scripts.training.model_architecture import create_model
+except ImportError:
+    from model_architecture import create_model
 
 # Configuration
 PROCESSED_DIR = Path("./data/processed")

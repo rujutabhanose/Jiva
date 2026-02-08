@@ -4,8 +4,9 @@ from app.api.v1 import users, auth, scans, identify, diagnose, feedback, admin_t
 # Import enhanced plant identification router
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-from plant_identifier_enhanced_api import plant_id_router
+backend_root = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(backend_root))
+from scripts.plant_id.plant_identifier_enhanced_api import plant_id_router
 
 api_router = APIRouter()
 

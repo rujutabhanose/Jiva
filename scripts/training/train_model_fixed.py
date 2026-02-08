@@ -22,7 +22,10 @@ from tensorflow.keras import layers
 from pathlib import Path
 import time
 
-from model_architecture import create_model
+try:
+    from scripts.training.model_architecture import create_model
+except ImportError:
+    from model_architecture import create_model
 
 # Configuration
 PROCESSED_DIR = Path("./data/processed")

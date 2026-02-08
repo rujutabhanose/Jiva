@@ -26,7 +26,7 @@ class DataConfig:
     @staticmethod
     def get_class_mapping():
         """Load class name mapping."""
-        mapping_file = PROJECT_ROOT / "disease_class_mapping.json"
+        mapping_file = PROJECT_ROOT / "data" / "class_mappings" / "disease_class_mapping.json"
         if mapping_file.exists():
             with open(mapping_file) as f:
                 return json.load(f)
@@ -60,7 +60,7 @@ class PathConfig:
     
     CALIBRATORS = ROOT / "calibrators.pkl"
     WEIGHTS = ROOT / "model_weights.json"
-    KB = ROOT / "knowledge_base.json"
+    KB = PROJECT_ROOT / "data" / "knowledge_bases" / "knowledge_base.json"
     
     def __post_init__(self):
         """Create directories."""

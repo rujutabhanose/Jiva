@@ -2,31 +2,48 @@
 """
 Plant species identification using juppy44/plant-identification-2m-vit-b
 Pretrained on 2M+ iNaturalist images
-Coverage: ~10,000 plant species globally
+Coverage: ~14,000 plant species globally
 """
 
 import json
 from pathlib import Path
 from typing import List, Dict
+import logging
 from huggingface_hub import InferenceClient
 
 # HuggingFace model
-MODEL_NAME = "juppy44/plant-identification-2m-vit-b"
-HF_TOKEN = None  # Optional: set HUGGINGFACE_TOKEN env var for higher rate limits
+MODEL_NAME = "juppy44/plant-identification-2m-vit-b"  # 14k species, 2M+ training images
+
+# HuggingFace authentication token (required for gated models like juppy44)
+# Token must have "Make calls to serverless Inference API" permission
+# Set HUGGINGFACE_TOKEN environment variable before running
+import os
+HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+if not HF_TOKEN:
+    raise ValueError("HUGGINGFACE_TOKEN environment variable is required")
+
+logger = logging.getLogger(__name__)
 
 class PlantIdentifier:
     """Identifies plant species from leaf/flower images."""
 
     def __init__(self):
-        # Use new router endpoint (api-inference.huggingface.co is deprecated)
-        self.client = InferenceClient(
-            model=f"https://router.huggingface.co/hf-inference/models/{MODEL_NAME}"
-        )
+        # Initialize HuggingFace Inference Client with authentication
+        try:
+            logger.info(f"Initializing model: {MODEL_NAME}")
+            # Use token for authentication (required for gated model)
+            self.client = InferenceClient(model=MODEL_NAME, token=HF_TOKEN)
+            self.active_model = MODEL_NAME
+            logger.info(f"✅ Successfully initialized model: {MODEL_NAME}")
+        except Exception as e:
+            logger.error(f"Failed to initialize model: {e}")
+            raise RuntimeError(f"Unable to initialize plant identification model: {e}")
 
-        # Load plant knowledge base (try both .json and no extension)
-        kb_path = Path(__file__).parent / "plant_knowledge_base.json"
+        # Load plant knowledge base from data directory
+        backend_root = Path(__file__).resolve().parents[2]  # .../backend
+        kb_path = backend_root / "data" / "knowledge_bases" / "plant_knowledge_base.json"
         if not kb_path.exists():
-            kb_path = Path(__file__).parent / "plant_knowledge_base"
+            kb_path = backend_root / "data" / "knowledge_bases" / "plant_knowledge_base"
 
         if kb_path.exists():
             with open(kb_path) as f:
@@ -43,24 +60,28 @@ class PlantIdentifier:
     ) -> Dict:
         """
         Identify plant species from image.
-        
+
         Args:
             image_path: Path to image file
             top_k: Return top K predictions
             region: Geographic region (for re-ranking)
             context: "houseplant", "outdoor", "crop", "wild"
-        
+
         Returns: {
             "plant": str,
             "confidence": float (0-1),
             "top_k": [{"species": str, "score": float}],
             "action": "CONFIDENT" | "UNCERTAIN" | "UNKNOWN",
-            "reasoning": str
+            "reasoning": str,
+            "model_used": str
         }
         """
-        
-        # Get predictions (pass file path directly - InferenceClient expects path, URL, or binary)
-        predictions = self.client.image_classification(image=image_path)
+
+        # Get predictions from HuggingFace Inference API
+        try:
+            predictions = self.client.image_classification(image=image_path)
+        except Exception:
+            return self._not_found_response()
         
         # Extract top predictions
         top_preds = predictions[:top_k]
@@ -83,15 +104,23 @@ class PlantIdentifier:
         else:
             action = "UNKNOWN"
         
+        # Format alternatives to match expected API schema
+        formatted_alternatives = [
+            {
+                "plant_name": s["label"],
+                "confidence": float(s["score"]),
+                "confidence_percent": float(s["score"]) * 100
+            }
+            for s in scored[1:3]  # Skip first (that's primary), take next 2
+        ]
+
         return {
             "plant": top_species,
             "confidence": float(top_conf),
-            "top_k": [
-                {"species": s["label"], "score": float(s["score"])}
-                for s in scored[:3]
-            ],
+            "top_k": formatted_alternatives,
             "action": action,
-            "reasoning": f"Model confidence: {top_conf*100:.0f}% ({top_species})"
+            "reasoning": f"Model confidence: {top_conf*100:.0f}% ({top_species})",
+            "model_used": self.active_model
         }
     
     def _apply_region_bias(self, predictions: List, region: str, context: str) -> List:
@@ -134,7 +163,8 @@ class PlantIdentifier:
             "confidence": 0.0,
             "top_k": [],
             "action": "UNKNOWN",
-            "reasoning": "Unable to identify from image. Try a clearer photo of the leaf or flower."
+            "reasoning": "Unable to identify from image. Try a clearer photo of the leaf or flower.",
+            "model_used": self.active_model or "none"
         }
 
 # Global instance

@@ -272,7 +272,7 @@ def main():
     parser.add_argument(
         '--class-mapping',
         type=str,
-        default='class_mapping.json',
+        default='data/class_mappings/class_mapping.json',
         help='Path to class mapping JSON file'
     )
     parser.add_argument(
