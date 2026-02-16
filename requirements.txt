@@ -1,39 +1,34 @@
+# ============================================
+# Jiva Plants API - Production Requirements
+# Lightweight version for t3.micro deployment
+# ============================================
+
 # Core FastAPI stack
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
 pydantic==2.10.0
 pydantic-settings==2.6.0
 sqlalchemy==2.0.36
-psycopg2-binary==2.9.9  # PostgreSQL adapter for production
+aiosqlite==0.19.0
 python-multipart==0.0.17
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-bcrypt>=4.0.0,<5.0.0  # Pin bcrypt v4.x for passlib compatibility
+bcrypt>=4.0.0,<5.0.0
 email-validator==2.2.0
 
 # Image processing
 Pillow==10.4.0
+numpy>=1.26.0
 
-# ML/AI - Hybrid Engine (CRITICAL ✅)
-transformers==4.45.0
-torch==2.6.0
-torchvision==0.21.0
-accelerate==0.30.0
+# ML/AI - Lightweight (TFLite + Cloud API)
+tflite-runtime==2.14.0
 huggingface_hub==0.26.2
-tensorflow==2.20.0  # For CoLeaf nutrient deficiency model
-tf-keras>=2.15.0  # Legacy Keras for model compatibility
-numpy>=2.1.0  # Required by TensorFlow
 
 # Environment
 python-dotenv==1.0.1
 
-# Continuous Learning
-apscheduler==3.10.4  # Scheduled model retraining
-httpx==0.27.0  # Async HTTP for Supabase storage
-scikit-learn==1.5.2  # Train/test split, metrics
+# HTTP client
+httpx==0.27.0
 
-# Dev tools
-pytest==8.3.4
-black==24.10.0
-flake8==7.1.1
-mypy==1.13.0
+# Production server
+gunicorn==21.2.0

@@ -3,6 +3,10 @@ Model Manager Service
 
 Handles model versioning, loading, hot-swapping, and rollback.
 Enables continuous learning by managing multiple model versions.
+
+Supports:
+  - TFLite models (.tflite) - Primary for mobile compatibility
+  - Keras models (.keras, .h5) - Fallback
 """
 
 import logging
@@ -25,6 +29,18 @@ BASE_DIR = Path(__file__).resolve().parents[2]  # .../backend
 MODELS_DIR = BASE_DIR / "models"
 VERSIONED_MODELS_DIR = MODELS_DIR / "versions"
 
+# TFLite model paths
+TFLITE_MODELS = {
+    "disease": {
+        "quantized": MODELS_DIR / "disease_detector_int8.tflite",
+        "full": MODELS_DIR / "disease_detector.tflite",
+    },
+    "coleaf": {
+        "quantized": MODELS_DIR / "nutrient_detector_int8.tflite",
+        "full": MODELS_DIR / "nutrient_detector.tflite",
+    },
+}
+
 
 class ModelManager:
     """
@@ -35,10 +51,13 @@ class ModelManager:
     - Hot-swap models without server restart
     - Automatic rollback if accuracy drops
     - Thread-safe model access
+    - TFLite support with Keras fallback
     """
 
     def __init__(self):
-        self._models: Dict[str, Any] = {}  # model_type -> loaded model
+        self._models: Dict[str, Any] = {}  # model_type -> loaded model (Keras)
+        self._tflite_interpreters: Dict[str, Any] = {}  # model_type -> TFLite interpreter
+        self._model_types: Dict[str, str] = {}  # model_type -> "tflite" or "keras"
         self._model_versions: Dict[str, ModelVersion] = {}  # model_type -> version info
         self._lock = threading.RLock()
         self._initialized = False
@@ -113,7 +132,12 @@ class ModelManager:
 
     def _load_baseline_model(self, model_type: str) -> bool:
         """
-        Load the original baseline model (fallback).
+        Load the baseline model with TFLite priority and Keras fallback.
+
+        Priority:
+        1. TFLite quantized (smallest, fastest)
+        2. TFLite full precision
+        3. Keras/H5 model
 
         Args:
             model_type: Type of model
@@ -121,6 +145,20 @@ class ModelManager:
         Returns:
             True if loaded successfully
         """
+        # Try TFLite first (mobile-compatible)
+        if model_type in TFLITE_MODELS:
+            tflite_paths = TFLITE_MODELS[model_type]
+            for variant in ["quantized", "full"]:
+                path = tflite_paths.get(variant)
+                if path and path.exists():
+                    interpreter = self._load_tflite_model(path)
+                    if interpreter:
+                        self._tflite_interpreters[model_type] = interpreter
+                        self._model_types[model_type] = "tflite"
+                        logger.info(f"Loaded TFLite {model_type} model ({variant}): {path.name}")
+                        return True
+
+        # Fallback to Keras/H5
         baseline_paths = {
             "coleaf": MODELS_DIR / "coleaf_production_v2.keras",
             "disease": MODELS_DIR / "disease_detector.h5",
@@ -132,11 +170,31 @@ class ModelManager:
             model = self._load_model_file(path, model_type)
             if model:
                 self._models[model_type] = model
-                logger.info(f"Loaded baseline {model_type} model from {path}")
+                self._model_types[model_type] = "keras"
+                logger.info(f"Loaded Keras baseline {model_type} model: {path.name}")
                 return True
 
         logger.warning(f"No baseline model available for {model_type}")
         return False
+
+    def _load_tflite_model(self, path: Path) -> Optional[Any]:
+        """
+        Load a TFLite model.
+
+        Args:
+            path: Path to .tflite file
+
+        Returns:
+            TFLite interpreter or None
+        """
+        try:
+            interpreter = tf.lite.Interpreter(model_path=str(path))
+            interpreter.allocate_tensors()
+            logger.info(f"TFLite model loaded: {path.name}")
+            return interpreter
+        except Exception as e:
+            logger.error(f"Failed to load TFLite model {path}: {e}")
+            return None
 
     def _load_model_file(self, path: Path, model_type: str) -> Optional[Any]:
         """
@@ -150,7 +208,9 @@ class ModelManager:
             Loaded model or None
         """
         try:
-            if path.suffix in [".keras", ".h5"]:
+            if path.suffix == ".tflite":
+                return self._load_tflite_model(path)
+            elif path.suffix in [".keras", ".h5"]:
                 # Pass custom_objects for models that use custom loss functions
                 custom_objects = {'FocalLoss': FocalLoss}
                 return tf.keras.models.load_model(str(path), custom_objects=custom_objects)
@@ -163,16 +223,46 @@ class ModelManager:
 
     def get_model(self, model_type: str) -> Optional[Any]:
         """
-        Get the currently active model for a given type.
+        Get the currently active Keras model for a given type.
 
         Args:
             model_type: Type of model
 
         Returns:
-            Loaded model or None
+            Loaded Keras model or None
         """
         with self._lock:
             return self._models.get(model_type)
+
+    def get_tflite_interpreter(self, model_type: str) -> Optional[Any]:
+        """
+        Get the TFLite interpreter for a given model type.
+
+        Args:
+            model_type: Type of model
+
+        Returns:
+            TFLite interpreter or None
+        """
+        with self._lock:
+            return self._tflite_interpreters.get(model_type)
+
+    def get_model_type(self, model_type: str) -> Optional[str]:
+        """
+        Get the loaded model format type.
+
+        Args:
+            model_type: Type of model
+
+        Returns:
+            "tflite" or "keras" or None
+        """
+        with self._lock:
+            return self._model_types.get(model_type)
+
+    def is_tflite(self, model_type: str) -> bool:
+        """Check if the loaded model is TFLite format."""
+        return self.get_model_type(model_type) == "tflite"
 
     def get_model_version(self, model_type: str) -> Optional[ModelVersion]:
         """

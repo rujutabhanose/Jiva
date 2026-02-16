@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """
-FIXED TRAINING SCRIPT - DISEASE CLASSIFICATION
+FIXED TRAINING SCRIPT - 15 CLASSES
 Achieves 90%+ accuracy with proper data handling
 """
-
-# Suppress numpy FutureWarning before any imports
-import warnings
-warnings.filterwarnings('ignore', category=FutureWarning)
 
 import json
 import numpy as np
@@ -18,22 +14,29 @@ from sklearn.utils.class_weight import compute_class_weight
 import time
 
 # ============= CONFIG =============
-PROCESSED_DIR = Path("./data/processed")
-CHECKPOINT_DIR = Path("./checkpoints_disease_only")
-LOGS_DIR = Path("./logs_disease_only")
+# Use absolute paths based on script location
+SCRIPT_DIR = Path(__file__).parent.resolve()
+BACKEND_DIR = SCRIPT_DIR.parent.parent
+DATA_DIR = BACKEND_DIR / "data"
+PROCESSED_DIR = DATA_DIR / "processed"
+RAW_DIR = DATA_DIR / "PlantVillage"
+CHECKPOINT_DIR = BACKEND_DIR / "checkpoints_disease_only"
+LOGS_DIR = BACKEND_DIR / "logs_disease_only"
 
 IMG_SIZE = 224
 BATCH_SIZE = 16  # Reduced from 32 for better gradient flow
 EPOCHS = 100
 INITIAL_LR = 5e-4  # Lower initial learning rate
-# NUM_DISEASE_CLASSES set dynamically after loading data
+NUM_DISEASE_CLASSES = 15
 
 CHECKPOINT_DIR.mkdir(exist_ok=True)
 LOGS_DIR.mkdir(exist_ok=True)
 
 print("="*70)
-print("PHASE 1: DISEASE CLASSIFICATION (19 CLASSES)")
+print(f"DISEASE CLASSIFICATION TRAINING ({NUM_DISEASE_CLASSES} CLASSES)")
 print("="*70)
+print(f"Data directory: {RAW_DIR}")
+print(f"Processed directory: {PROCESSED_DIR}")
 
 # ============= LOAD DATA =============
 print("\n[1] Loading data...")
@@ -47,45 +50,27 @@ val_data = splits['val']
 print(f"  Train: {len(train_data)} images")
 print(f"  Val: {len(val_data)} images")
 
-# ============= VERIFY AND REMAP CLASS IDS =============
+# ============= VERIFY CLASS IDS =============
 print("\n[2] Verifying class IDs...")
 
 train_class_ids = np.array([img['class_id'] for img in train_data])
-unique_classes = sorted(set(int(x) for x in np.unique(train_class_ids)))
+unique_classes = np.unique(train_class_ids)
 
-print(f"  Found {len(unique_classes)} unique classes")
-print(f"  Original IDs: {unique_classes}")
+print(f"  Unique classes: {sorted(unique_classes)}")
+print(f"  Expected: 0-{NUM_DISEASE_CLASSES-1} ({NUM_DISEASE_CLASSES} classes)")
 
-# Check if remapping needed (IDs not contiguous 0 to N-1)
-expected_ids = list(range(len(unique_classes)))
-needs_remapping = unique_classes != expected_ids
-
-if needs_remapping:
-    print(f"  Remapping to contiguous IDs 0-{len(unique_classes)-1}...")
-
-    # Create mapping: original_id -> new_contiguous_id
-    id_remap = {old_id: new_id for new_id, old_id in enumerate(unique_classes)}
-
-    # Remap in train and val data
-    for img in train_data:
-        img['class_id'] = id_remap[int(img['class_id'])]
-    for img in val_data:
-        img['class_id'] = id_remap[int(img['class_id'])]
-
-    # Update for downstream use
-    train_class_ids = np.array([img['class_id'] for img in train_data])
-    unique_classes = sorted(set(int(x) for x in np.unique(train_class_ids)))
-    print(f"  ✓ Remapped to: {unique_classes}")
-
-NUM_DISEASE_CLASSES = len(unique_classes)
-print(f"  ✓ {NUM_DISEASE_CLASSES} classes ready")
+if len(unique_classes) != NUM_DISEASE_CLASSES or min(unique_classes) != 0 or max(unique_classes) != NUM_DISEASE_CLASSES - 1:
+    print("  ❌ ERROR: Class IDs mismatch!")
+    exit(1)
+else:
+    print("  ✓ Class IDs correct")
 
 # ============= COMPUTE CLASS WEIGHTS =============
 print("\n[3] Computing class weights...")
 
 class_weights = compute_class_weight(
     'balanced',
-    classes=np.array(unique_classes),
+    classes=unique_classes,
     y=train_class_ids
 )
 
@@ -100,7 +85,7 @@ print("\n[4] Creating data pipeline...")
 
 def load_image(img_info):
     """Load, verify, and preprocess image"""
-    img_path = PROCESSED_DIR / img_info["path"]
+    img_path = RAW_DIR / img_info["path"]
     
     try:
         # Read image
@@ -157,7 +142,9 @@ def create_dataset(data_list, batch_size, augment=False):
 
         dataset = dataset.map(augment_fn, num_parallel_calls=tf.data.AUTOTUNE)
 
-    # IMPORTANT: repeat() allows dataset to loop for multiple epochs
+    # Shuffle (for training), repeat for multiple epochs, batch, prefetch
+    if augment:
+        dataset = dataset.shuffle(buffer_size=1000)
     dataset = dataset.repeat()
     dataset = dataset.batch(batch_size, drop_remainder=True)
     dataset = dataset.prefetch(tf.data.AUTOTUNE)

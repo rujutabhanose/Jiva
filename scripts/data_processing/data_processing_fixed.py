@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-FIXED DATA PROCESSING - Handles nested dataset folder structure
-Processes: plant-village/segmented, plantify-dr, niphad-grape
+FIXED DATA PROCESSING - HANDLES 15 CLASSES FROM PLANTVILLAGE
+This processes PlantVillage data with proper class mapping
 """
 
 import json
@@ -9,12 +9,14 @@ import numpy as np
 from pathlib import Path
 from sklearn.model_selection import train_test_split
 from PIL import Image
-from tqdm import tqdm
 import random
 
 # ============= CONFIG =============
-DATA_DIR = Path("./data")
-RAW_DIR = DATA_DIR / "raw"
+# Use absolute path to the PlantVillage data
+SCRIPT_DIR = Path(__file__).parent.resolve()
+BACKEND_DIR = SCRIPT_DIR.parent.parent
+DATA_DIR = BACKEND_DIR / "data"
+RAW_DIR = DATA_DIR / "PlantVillage"
 PROCESSED_DIR = DATA_DIR / "processed"
 IMG_SIZE = 224
 SEED = 42
@@ -24,112 +26,92 @@ np.random.seed(SEED)
 
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
-print("=" * 70)
-print("DATA PROCESSING - NESTED FOLDER STRUCTURE")
-print("=" * 70)
+print("="*70)
+print("DATA PROCESSING - 15 CLASS MAPPING")
+print("="*70)
 
-# ============= DATASET CONFIGURATIONS =============
-# Each entry: (dataset_name, raw_path, class_name_mapping)
-# class_name_mapping: dict mapping folder names to standardized class names (or None to use folder name as-is)
+# ============= DEFINE 15 CLASSES FROM YOUR DATASET =============
+# These match the actual folders in PlantVillage
+DISEASE_CLASSES = {
+    0: "Pepper__bell___Bacterial_spot",
+    1: "Pepper__bell___healthy",
+    2: "Potato___Early_blight",
+    3: "Potato___Late_blight",
+    4: "Potato___healthy",
+    5: "Tomato_Bacterial_spot",
+    6: "Tomato_Early_blight",
+    7: "Tomato_Late_blight",
+    8: "Tomato_Leaf_Mold",
+    9: "Tomato_Septoria_leaf_spot",
+    10: "Tomato_Spider_mites_Two_spotted_spider_mite",
+    11: "Tomato__Target_Spot",
+    12: "Tomato__Tomato_YellowLeaf__Curl_Virus",
+    13: "Tomato__Tomato_mosaic_virus",
+    14: "Tomato_healthy",
+}
 
-DATASETS = [
-    ("plant_village", RAW_DIR / "plant-village" / "segmented", None),
-    ("plantify_dr", RAW_DIR / "plantify-dr", None),
-    ("niphad_grape", RAW_DIR / "niphad-grape", None),
-]
+# Reverse mapping
+CLASS_NAME_TO_ID = {v: k for k, v in DISEASE_CLASSES.items()}
 
-# ============= BUILD GLOBAL CLASS MAPPING =============
-print("\nScanning datasets to build class mapping...")
+NUM_CLASSES = len(DISEASE_CLASSES)
+print(f"\n✓ {NUM_CLASSES} classes defined:")
+for cid, cname in sorted(DISEASE_CLASSES.items()):
+    print(f"  {cid:2d} → {cname}")
 
-class_name_to_id = {}
-next_id = 0
+# ============= SCAN RAW DATA =============
+print(f"\n\nScanning {RAW_DIR}...")
+
 all_images = []
+class_counts = {i: 0 for i in range(NUM_CLASSES)}
 
-for dataset_name, raw_path, name_mapping in DATASETS:
-    if not raw_path.exists():
-        print(f"  Warning: {raw_path} not found, skipping")
+# Look for folders matching class names
+for class_folder in sorted(RAW_DIR.glob("*")):
+    if not class_folder.is_dir():
         continue
+    
+    folder_name = class_folder.name
+    
+    # Find matching class ID
+    class_id = None
+    for cid, cname in DISEASE_CLASSES.items():
+        if cname.lower() == folder_name.lower() or \
+           cname.replace("___", "_").lower() == folder_name.lower():
+            class_id = cid
+            break
+    
+    if class_id is None:
+        print(f"  ⚠️  Skipping folder '{folder_name}' (no class match)")
+        continue
+    
+    # Load all images in this folder
+    image_files = list(class_folder.glob("*.jpg")) + list(class_folder.glob("*.jpeg")) + \
+                  list(class_folder.glob("*.png")) + list(class_folder.glob("*.JPG"))
+    
+    for img_path in image_files:
+        try:
+            # Verify image is valid
+            img = Image.open(img_path)
+            img.verify()
+            
+            all_images.append({
+                'path': f"{folder_name}/{img_path.name}",
+                'class_id': class_id,
+                'class_name': DISEASE_CLASSES[class_id],
+            })
+            class_counts[class_id] += 1
+        except Exception as e:
+            print(f"    ✗ Invalid: {img_path.name}")
 
-    print(f"\nProcessing: {dataset_name} ({raw_path})")
-
-    # Create output directory for this dataset
-    dataset_out_dir = PROCESSED_DIR / dataset_name
-    dataset_out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Find all class folders
-    class_folders = sorted([d for d in raw_path.iterdir() if d.is_dir()])
-
-    for class_folder in tqdm(class_folders, desc=f"  {dataset_name}"):
-        folder_name = class_folder.name
-
-        # Get standardized class name
-        if name_mapping and folder_name in name_mapping:
-            class_name = name_mapping[folder_name]
-        else:
-            class_name = folder_name
-
-        # Assign class ID if new
-        if class_name not in class_name_to_id:
-            class_name_to_id[class_name] = next_id
-            next_id += 1
-
-        class_id = class_name_to_id[class_name]
-
-        # Create output class directory
-        class_out_dir = dataset_out_dir / class_name
-        class_out_dir.mkdir(parents=True, exist_ok=True)
-
-        # Find all images
-        image_files = []
-        for ext in ("*.jpg", "*.JPG", "*.jpeg", "*.JPEG", "*.png", "*.PNG"):
-            image_files.extend(class_folder.glob(ext))
-
-        for img_path in image_files:
-            try:
-                # Load and resize image
-                img = Image.open(img_path).convert("RGB")
-                img = img.resize((IMG_SIZE, IMG_SIZE), Image.Resampling.LANCZOS)
-
-                # Generate output filename
-                img_index = len(all_images)
-                out_filename = f"{img_index:06d}.jpg"
-                out_path = class_out_dir / out_filename
-
-                # Save processed image
-                img.save(out_path, quality=95)
-
-                # Record image info
-                all_images.append({
-                    "id": img_index,
-                    "class": class_name,
-                    "class_id": class_id,
-                    "path": f"{dataset_name}/{class_name}/{out_filename}",
-                    "source_dataset": dataset_name,
-                })
-
-            except Exception as e:
-                print(f"    Error processing {img_path.name}: {e}")
-
-print(f"\n\nTotal images processed: {len(all_images)}")
-print(f"Total classes found: {len(class_name_to_id)}")
-
-# ============= CLASS DISTRIBUTION =============
+print(f"\n✓ Scanned {len(all_images)} valid images")
 print("\nClass distribution:")
-from collections import Counter
-class_counts = Counter(img['class_id'] for img in all_images)
-
-for class_name, class_id in sorted(class_name_to_id.items(), key=lambda x: x[1]):
-    count = class_counts.get(class_id, 0)
-    pct = 100 * count / len(all_images) if all_images else 0
-    bar = "#" * max(1, int(pct / 2))
-    print(f"  {class_id:2d} {class_name:45s} {count:5d} ({pct:5.1f}%) {bar}")
+for cid in sorted(class_counts.keys()):
+    count = class_counts[cid]
+    pct = 100 * count / len(all_images)
+    bar = "█" * max(1, int(pct / 2))
+    print(f"  Class {cid:2d}: {count:5d} ({pct:5.1f}%) {bar}")
 
 # ============= SPLIT DATA =============
-print("\n\nSplitting data (82% train, 18% val)...")
-
-if len(all_images) == 0:
-    print("ERROR: No images found! Check your data/raw directory structure.")
-    exit(1)
+print("\n\nSplitting data...")
 
 train_data, val_data = train_test_split(
     all_images,
@@ -141,56 +123,40 @@ train_data, val_data = train_test_split(
 print(f"  Train: {len(train_data)} images")
 print(f"  Val:   {len(val_data)} images")
 
-# Add split field
-for img in train_data:
-    img['split'] = 'train'
-for img in val_data:
-    img['split'] = 'val'
+# ============= SAVE SPLITS =============
+print("\nSaving splits...")
 
-# ============= SAVE FILES =============
-print("\nSaving output files...")
+splits = {
+    'train': train_data,
+    'val': val_data,
+}
 
-# Save splits
-splits = {'train': train_data, 'val': val_data}
 with open(PROCESSED_DIR / "splits.json", 'w') as f:
-    json.dump(splits, f)
-print("  splits.json")
+    json.dump(splits, f, indent=2)
 
-# Save unified class index (id -> name)
-unified_class_index = {str(v): k for k, v in class_name_to_id.items()}
+print("  ✓ splits.json saved")
+
+# ============= SAVE CLASS INDEX =============
+print("Saving class index...")
+
+class_index = DISEASE_CLASSES.copy()
+
 with open(PROCESSED_DIR / "unified_class_index.json", 'w') as f:
-    json.dump(unified_class_index, f, indent=2)
-print("  unified_class_index.json")
+    json.dump(class_index, f, indent=2)
 
-# Save class name to id mapping
-with open(PROCESSED_DIR / "class_name_to_id.json", 'w') as f:
-    json.dump(class_name_to_id, f, indent=2)
-print("  class_name_to_id.json")
+print("  ✓ unified_class_index.json saved")
 
-# Save all images index
-with open(PROCESSED_DIR / "unified_image_index.json", 'w') as f:
-    json.dump(all_images, f)
-print("  unified_image_index.json")
-
-# ============= VERIFICATION =============
-print("\n" + "=" * 70)
+# ============= VERIFY =============
+print("\n" + "="*70)
 print("VERIFICATION")
-print("=" * 70)
+print("="*70)
 
-train_classes = set(img['class_id'] for img in train_data)
-val_classes = set(img['class_id'] for img in val_data)
+train_class_ids = [img['class_id'] for img in train_data]
+val_class_ids = [img['class_id'] for img in val_data]
 
-print(f"\nClasses in train: {sorted(train_classes)}")
-print(f"Classes in val:   {sorted(val_classes)}")
-print(f"Total unique classes: {len(class_name_to_id)}")
+print(f"\nUnique classes in train: {sorted(set(train_class_ids))}")
+print(f"Unique classes in val:   {sorted(set(val_class_ids))}")
+print(f"All {NUM_CLASSES} classes present: {sorted(set(train_class_ids + val_class_ids)) == list(range(NUM_CLASSES))}")
 
-# Verify a few paths exist
-print("\nVerifying sample paths...")
-for img in random.sample(all_images, min(5, len(all_images))):
-    full_path = PROCESSED_DIR / img['path']
-    status = "OK" if full_path.exists() else "MISSING"
-    print(f"  [{status}] {img['path']}")
-
-print("\n" + "=" * 70)
-print("DATA PROCESSING COMPLETE")
-print("=" * 70)
+print("\n✅ DATA PROCESSING COMPLETE")
+print("="*70)

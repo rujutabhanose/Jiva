@@ -1,75 +1,122 @@
 #!/usr/bin/env python3
-"""Final disease model validation"""
+"""
+FIXED VALIDATION SCRIPT
+"""
 
 import json
-from pathlib import Path
-import tensorflow as tf
-from tensorflow import keras
 import numpy as np
+import tensorflow as tf
+from pathlib import Path
 
 PROCESSED_DIR = Path("./data/processed")
 CHECKPOINT_DIR = Path("./checkpoints_disease_only")
-NUM_CLASSES = 19  # Model was trained with 19 classes (0-18)
+IMG_SIZE = 224
 
-print("=" * 70)
-print("DISEASE MODEL VALIDATION")
-print("=" * 70)
+print("="*70)
+print("VALIDATING DISEASE MODEL")
+print("="*70)
 
-# Load best model
+# ============= LOAD MODEL =============
 print("\n[1] Loading model...")
-model = keras.models.load_model(str(CHECKPOINT_DIR / "model_best.h5"), compile=False)
-model.compile(
-    optimizer='adam',
-    loss='sparse_categorical_crossentropy',
-    metrics=['accuracy']
-)
-print(f"    Model output classes: {model.output_shape[-1]}")
 
-# Load val data
+model_path = CHECKPOINT_DIR / "model_best.h5"
+if not model_path.exists():
+    model_path = CHECKPOINT_DIR / "model_final.h5"
+
+if not model_path.exists():
+    print("❌ No model found!")
+    exit(1)
+
+model = tf.keras.models.load_model(str(model_path))
+print(f"  ✓ Model loaded: {model_path.name}")
+
+# ============= LOAD DATA =============
 print("\n[2] Loading validation data...")
+
 with open(PROCESSED_DIR / "splits.json") as f:
     splits = json.load(f)
 
-# Filter to only classes the model was trained on (0-18)
-val_data = [img for img in splits['val'] if img['class_id'] < NUM_CLASSES]
-print(f"    Total val images: {len(splits['val'])}")
-print(f"    Filtered (classes 0-{NUM_CLASSES-1}): {len(val_data)}")
+val_data = splits['val']
 
-# Load class names for reporting
+# Load images
+val_images = []
+val_labels = []
+
+for i, img_info in enumerate(val_data):
+    if i % 500 == 0:
+        print(f"  Loading {i}/{len(val_data)}")
+    
+    img_path = PROCESSED_DIR.parent / "raw" / img_info["path"]
+    
+    try:
+        img = tf.io.read_file(str(img_path))
+        img = tf.image.decode_jpeg(img, channels=3)
+        img = tf.image.resize(img, (IMG_SIZE, IMG_SIZE))
+        img = tf.cast(img, tf.float32) / 255.0
+        
+        val_images.append(img)
+        val_labels.append(img_info['class_id'])
+    except:
+        pass
+
+val_images = np.array(val_images)
+val_labels = np.array(val_labels)
+
+print(f"  ✓ Loaded {len(val_images)} validation images")
+
+# ============= LOAD CLASS NAMES =============
+print("\n[3] Loading class mapping...")
+
 with open(PROCESSED_DIR / "unified_class_index.json") as f:
     class_index = json.load(f)
 
-# Create validation dataset
-def load_image(img_info):
-    img_path = PROCESSED_DIR / img_info["path"]
-    image = tf.io.read_file(str(img_path))
-    image = tf.image.decode_jpeg(image, channels=3)
-    image = tf.image.resize(image, (224, 224))
-    image = tf.cast(image, tf.float32) / 255.0
-    label = tf.cast(img_info['class_id'], tf.int32)
-    return image, label
+# Convert to {id: name}
+id_to_name = {int(k): v for k, v in class_index.items()}
 
-print("\n[3] Creating dataset...")
-dataset = tf.data.Dataset.from_generator(
-    (lambda: (load_image(img) for img in val_data)),
-    output_signature=(
-        tf.TensorSpec(shape=(224, 224, 3), dtype=tf.float32),
-        tf.TensorSpec(shape=(), dtype=tf.int32)
-    )
-).batch(32).prefetch(tf.data.AUTOTUNE)
+print(f"  ✓ Loaded {len(id_to_name)} classes")
 
-# Evaluate
-print("\n[4] Evaluating...")
-loss, accuracy = model.evaluate(dataset, verbose=1)
+# ============= RUN PREDICTIONS =============
+print("\n[4] Running predictions...")
 
-print("\n" + "=" * 70)
-print(f"✅ VALIDATION ACCURACY: {accuracy:.4f} ({accuracy*100:.2f}%)")
-print(f"   Loss: {loss:.4f}")
-print("=" * 70)
+predictions = model.predict(val_images, batch_size=32)
+predicted_classes = np.argmax(predictions, axis=1)
+predicted_probs = np.max(tf.nn.softmax(predictions), axis=1)
 
-# Show which classes were validated
-print("\nClasses validated:")
-for i in range(NUM_CLASSES):
-    class_name = class_index.get(str(i), f"Unknown_{i}")
-    count = sum(1 for img in val_data if img['class_id'] == i)
-    print(f"  {i:2d}: {class_name:<45} ({count} images)")
+# ============= OVERALL ACCURACY =============
+overall_acc = np.mean(predicted_classes == val_labels)
+
+print(f"\n✅ OVERALL VALIDATION ACCURACY: {overall_acc:.4f} ({overall_acc*100:.1f}%)")
+
+# ============= PER-CLASS ACCURACY =============
+print("\n[5] Per-class accuracy:")
+
+per_class_acc = {}
+for class_id in sorted(np.unique(val_labels)):
+    mask = val_labels == class_id
+    class_acc = np.mean(predicted_classes[mask] == val_labels[mask])
+    class_name = id_to_name.get(class_id, f"Unknown_{class_id}")
+    per_class_acc[class_id] = class_acc
+    
+    print(f"  {class_id:2d} | {class_name:40s} | {class_acc:.4f} ({class_acc*100:.1f}%)")
+
+# ============= SUMMARY =============
+print("\n" + "="*70)
+min_acc = min(per_class_acc.values())
+max_acc = max(per_class_acc.values())
+avg_acc = np.mean(list(per_class_acc.values()))
+
+print(f"Overall accuracy: {overall_acc:.1%}")
+print(f"Average per-class: {avg_acc:.1%}")
+print(f"Min per-class: {min_acc:.1%}")
+print(f"Max per-class: {max_acc:.1%}")
+
+if overall_acc > 0.90:
+    print("\n✅ EXCELLENT! Ready for production.")
+elif overall_acc > 0.80:
+    print("\n✅ GOOD! Can be used with caution.")
+elif overall_acc > 0.70:
+    print("\n⚠️  NEEDS IMPROVEMENT")
+else:
+    print("\n❌ POOR. Check data pipeline.")
+
+print("="*70)

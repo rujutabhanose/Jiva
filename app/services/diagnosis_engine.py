@@ -1,18 +1,28 @@
 """
 Hybrid Plant Diagnosis Engine v2.0
-Combines MobileNetV2 (diseases) + LLaVA (symptoms/nutrients) + Rule heuristics
+Combines TFLite/MobileNetV2 (diseases) + CoLeaf (nutrients) + Rule heuristics
+
+Model loading priority for disease detection:
+  1. TFLite quantized (disease_detector_int8.tflite) - fastest, mobile-compatible
+  2. TFLite full (disease_detector.tflite) - fallback
+  3. HuggingFace pipeline - cloud fallback
 
 With continuous learning support:
 - Tracks model versions for each prediction
 - Results include model_version_id for feedback correlation
 """
 
-from transformers import pipeline
-from huggingface_hub import InferenceClient
+import json
+from pathlib import Path
 from typing import List, Dict, Optional
 import logging
-import re
 import asyncio
+
+import numpy as np
+from PIL import Image
+import tensorflow as tf
+from huggingface_hub import InferenceClient
+
 from app.services.coleaf_engine import run_coleaf, get_model_version_id as get_coleaf_version
 from .disease_mapping import (
     get_diagnosis_info, normalize_label, is_nutrient_deficiency,
@@ -22,14 +32,87 @@ from .hybrid_plant_identifier import identify_plant_hybrid
 
 logger = logging.getLogger(__name__)
 
-# Load models
-disease_model = pipeline(
-    "image-classification",
-    model="linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification"
-)
+# Paths
+BASE_DIR = Path(__file__).resolve().parents[2]  # .../backend
+MODELS_DIR = BASE_DIR / "models"
+DATA_DIR = BASE_DIR / "data" / "processed"
+
+TFLITE_QUANTIZED = MODELS_DIR / "disease_detector_int8.tflite"
+TFLITE_FULL = MODELS_DIR / "disease_detector.tflite"
+CLASS_INDEX_FILE = DATA_DIR / "unified_class_index.json"
+
+IMG_SIZE = 224
+
+# Load disease class indices
+DISEASE_CLASS_NAMES: Dict[int, str] = {}
+try:
+    with CLASS_INDEX_FILE.open("r", encoding="utf-8") as f:
+        raw = json.load(f)
+        DISEASE_CLASS_NAMES = {int(k): v for k, v in raw.items()}
+    logger.info(f"Disease class index loaded: {len(DISEASE_CLASS_NAMES)} classes")
+except Exception as e:
+    logger.warning(f"Failed to load disease class index: {e}")
+
+# TFLite interpreter (loaded lazily)
+_tflite_interpreter = None
+_tflite_model_path = None
+_huggingface_pipeline = None
+_disease_model_format = None  # "tflite" or "huggingface"
+
+
+def _load_tflite_disease_model():
+    """Load TFLite disease model with fallback between quantized and full."""
+    global _tflite_interpreter, _tflite_model_path, _disease_model_format
+
+    if _tflite_interpreter is not None:
+        return _tflite_interpreter
+
+    for model_path in [TFLITE_QUANTIZED, TFLITE_FULL]:
+        if model_path.exists():
+            try:
+                interpreter = tf.lite.Interpreter(model_path=str(model_path))
+                interpreter.allocate_tensors()
+                _tflite_interpreter = interpreter
+                _tflite_model_path = model_path
+                _disease_model_format = "tflite"
+                logger.info(f"Disease TFLite model loaded: {model_path.name}")
+                return interpreter
+            except Exception as e:
+                logger.warning(f"Failed to load TFLite {model_path.name}: {e}")
+                continue
+
+    return None
+
+
+def _load_huggingface_disease_model():
+    """Load HuggingFace pipeline as fallback."""
+    global _huggingface_pipeline, _disease_model_format
+
+    if _huggingface_pipeline is not None:
+        return _huggingface_pipeline
+
+    try:
+        from transformers import pipeline
+        _huggingface_pipeline = pipeline(
+            "image-classification",
+            model="linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification"
+        )
+        _disease_model_format = "huggingface"
+        logger.info("Disease HuggingFace pipeline loaded as fallback")
+        return _huggingface_pipeline
+    except Exception as e:
+        logger.error(f"Failed to load HuggingFace disease pipeline: {e}")
+        return None
+
+
+# Initialize disease model: Try TFLite first, then HuggingFace
+_load_tflite_disease_model() or _load_huggingface_disease_model()
+if _disease_model_format:
+    logger.info(f"Disease detection initialized with {_disease_model_format} model")
+else:
+    logger.error("Disease detection: No model loaded!")
 
 # LLaVA client for symptom analysis (nutrient deficiencies + broad coverage)
-# Using new Hugging Face router endpoint (api-inference.huggingface.co is deprecated)
 llava_client = InferenceClient(
     model="YuchengShi/LLaVA-v1.5-7B-Plant-Leaf-Diseases-Detection"
 )
@@ -98,75 +181,203 @@ def diagnose_image(image_path: str, top_k: int = 5) -> Dict:
     result["plant_name"] = plant_name
     return result
 
-def _run_disease_model(image_path: str, top_k: int = 5) -> Dict:
-    """Your existing MobileNetV2 logic (diseases)"""
+def _preprocess_disease_image(image_path: str) -> np.ndarray:
+    """Preprocess image for disease TFLite model."""
+    img = Image.open(image_path).convert("RGB")
+    img = img.resize((IMG_SIZE, IMG_SIZE))
+    arr = np.array(img).astype("float32") / 255.0
+    return np.expand_dims(arr, axis=0)  # (1, H, W, 3)
+
+
+def _softmax(x: np.ndarray) -> np.ndarray:
+    """Apply softmax to convert logits to probabilities."""
+    exp_x = np.exp(x - np.max(x))  # Subtract max for numerical stability
+    return exp_x / exp_x.sum()
+
+
+def _run_tflite_disease_inference(image_path: str, top_k: int = 5) -> Optional[List[Dict]]:
+    """Run disease inference using TFLite model."""
+    if _tflite_interpreter is None:
+        return None
+
     try:
-        # Check if image file exists
-        import os
-        if not os.path.exists(image_path):
-            logger.error(f"Image file not found: {image_path}")
-            return {"diagnoses": [], "confidence": 0.0}
+        input_details = _tflite_interpreter.get_input_details()
+        output_details = _tflite_interpreter.get_output_details()
 
-        logger.info(f"Running MobileNetV2 on image: {image_path}")
-        predictions = disease_model(image_path, top_k=top_k)
+        input_data = _preprocess_disease_image(image_path)
+        _tflite_interpreter.set_tensor(input_details[0]['index'], input_data)
+        _tflite_interpreter.invoke()
 
-        if not predictions:
-            logger.warning("MobileNetV2 returned no predictions")
-            return {"diagnoses": [], "confidence": 0.0}
+        output_data = _tflite_interpreter.get_tensor(output_details[0]['index'])[0]
 
-        logger.info(f"MobileNetV2 returned {len(predictions)} predictions")
-        logger.debug(f"Raw predictions: {predictions}")
+        # Apply softmax to convert logits to probabilities
+        probabilities = _softmax(output_data)
 
-        diagnoses = []
-        for pred in predictions:
-            raw_label = pred.get('label', '')
-            # First try normalized mapping
-            diagnosis_info = get_diagnosis_info(raw_label)
+        # Get top-k predictions
+        top_indices = np.argsort(probabilities)[-top_k:][::-1]
 
-            # Fallback: extract disease substring (e.g. "Bell Pepper with Bacterial Spot" -> "Bacterial Spot")
-            if diagnosis_info is None:
-                try:
-                    lower = raw_label.lower()
-                    disease_part = None
-                    if ' with ' in lower:
-                        disease_part = raw_label.split(' with ', 1)[1]
-                    elif ' of ' in lower:
-                        disease_part = raw_label.split(' of ', 1)[1]
-                    elif 'healthy' in lower:
-                        disease_part = 'healthy'
+        results = []
+        for idx in top_indices:
+            idx = int(idx)
+            score = float(probabilities[idx])
+            label = DISEASE_CLASS_NAMES.get(idx, f"class_{idx}")
+            results.append({"label": label, "score": score})
 
-                    if disease_part:
-                        diagnosis_info = get_diagnosis_info(disease_part)
-                        if diagnosis_info:
-                            logger.info(f"Mapped MobileNet label '{raw_label}' -> '{disease_part}'")
-                except Exception:
-                    diagnosis_info = None
-
-            if diagnosis_info:
-                diagnoses.append({
-                    "source": "mobilenet",
-                    "label": normalize_label(raw_label),
-                    "confidence": pred['score'],
-                    "category": diagnosis_info.category,
-                    "subcategory": diagnosis_info.subcategory,
-                    "info": diagnosis_info
-                })
-            else:
-                logger.warning(f"No mapping found for MobileNet label: {raw_label}")
-
-        if not diagnoses:
-            logger.warning("All MobileNet predictions failed to map to disease database")
-        else:
-            logger.info(f"Successfully mapped {len(diagnoses)} diagnoses")
-
-        # Calculate max confidence from predictions
-        max_confidence = max([p['score'] for p in predictions]) if predictions else 0.0
-
-        return {"diagnoses": diagnoses, "confidence": max_confidence}
+        logger.info(f"TFLite disease inference: {results[0]['label']} ({results[0]['score']:.2%})")
+        return results
 
     except Exception as e:
-        logger.error(f"Error in disease model: {e}", exc_info=True)
+        logger.error(f"TFLite disease inference failed: {e}")
+        return None
+
+
+def _run_huggingface_disease_inference(image_path: str, top_k: int = 5) -> Optional[List[Dict]]:
+    """Run disease inference using HuggingFace pipeline."""
+    pipeline = _load_huggingface_disease_model()
+    if pipeline is None:
+        return None
+
+    try:
+        predictions = pipeline(image_path, top_k=top_k)
+        results = [{"label": p["label"], "score": p["score"]} for p in predictions]
+        logger.info(f"HuggingFace disease inference: {results[0]['label']} ({results[0]['score']:.2%})")
+        return results
+    except Exception as e:
+        logger.error(f"HuggingFace disease inference failed: {e}")
+        return None
+
+
+def _run_disease_model(image_path: str, top_k: int = 5) -> Dict:
+    """
+    Run disease detection with hybrid TFLite + HuggingFace approach.
+
+    Strategy:
+    1. Run TFLite (fast, local, 15 classes)
+    2. If TFLite confidence < 90%, also run HuggingFace (slower, 38 classes)
+    3. Pick the result with higher confidence
+
+    This ensures we get the best of both models:
+    - TFLite for fast inference on known diseases
+    - HuggingFace for broader coverage (powdery mildew, apple diseases, etc.)
+    """
+    import os
+    if not os.path.exists(image_path):
+        logger.error(f"Image file not found: {image_path}")
         return {"diagnoses": [], "confidence": 0.0}
+
+    # Run TFLite first (fast, local)
+    tflite_predictions = _run_tflite_disease_inference(image_path, top_k)
+    tflite_conf = tflite_predictions[0]["score"] if tflite_predictions else 0.0
+
+    # If TFLite confidence is low (<90%), also try HuggingFace for broader coverage
+    hf_predictions = None
+    hf_conf = 0.0
+
+    if tflite_conf < 0.90:
+        logger.info(f"TFLite confidence ({tflite_conf:.1%}) < 90%, checking HuggingFace...")
+        hf_predictions = _run_huggingface_disease_inference(image_path, top_k)
+        hf_conf = hf_predictions[0]["score"] if hf_predictions else 0.0
+
+    # Combine results from both models for best coverage
+    # TFLite may not have all disease classes, HuggingFace has broader coverage
+    all_predictions = []
+
+    if tflite_predictions:
+        for p in tflite_predictions:
+            p["model_source"] = "tflite"
+            # When in hybrid mode, TFLite was uncertain (<90%) and only has 15 classes.
+            # Apply a small penalty so HuggingFace (38 classes) is preferred when scores are close.
+            if hf_predictions:
+                p["score"] = p["score"] * 0.95
+        all_predictions.extend(tflite_predictions)
+
+    if hf_predictions:
+        for p in hf_predictions:
+            p["model_source"] = "huggingface"
+        all_predictions.extend(hf_predictions)
+
+    if not all_predictions:
+        logger.warning("All disease detection methods failed")
+        return {"diagnoses": [], "confidence": 0.0}
+
+    # Sort by confidence and take top results
+    all_predictions.sort(key=lambda x: x["score"], reverse=True)
+    predictions = all_predictions[:top_k]
+    source = "hybrid" if (tflite_predictions and hf_predictions) else predictions[0].get("model_source", "unknown")
+    logger.info(f"Combined predictions: TFLite={len(tflite_predictions or [])} + HuggingFace={len(hf_predictions or [])}")
+
+    diagnoses = []
+    for pred in predictions:
+        raw_label = pred.get('label', '')
+        # First try normalized mapping
+        diagnosis_info = get_diagnosis_info(raw_label)
+
+        # Fallback: extract disease substring with multiple strategies
+        if diagnosis_info is None:
+            try:
+                lower = raw_label.lower()
+                disease_part = None
+
+                # Strategy 1: HuggingFace format "X with Y"
+                if ' with ' in lower:
+                    disease_part = raw_label.split(' with ', 1)[1]
+                elif ' of ' in lower:
+                    disease_part = raw_label.split(' of ', 1)[1]
+
+                # Strategy 2: TFLite format "Tomato___Early_blight" or "Tomato_Early_blight"
+                elif '___' in raw_label:
+                    disease_part = raw_label.split('___')[-1].replace('_', ' ')
+                elif '__' in raw_label:
+                    disease_part = raw_label.split('__')[-1].replace('_', ' ')
+                elif '_' in raw_label and any(crop in lower for crop in ['tomato', 'potato', 'pepper', 'grape', 'cherry']):
+                    # Handle "Tomato_Late_blight" format
+                    parts = raw_label.split('_')
+                    # Skip the crop name (first part)
+                    disease_part = '_'.join(parts[1:]).replace('_', ' ')
+
+                # Strategy 3: Healthy detection
+                if 'healthy' in lower:
+                    disease_part = 'healthy'
+
+                if disease_part:
+                    # Try the extracted part
+                    diagnosis_info = get_diagnosis_info(disease_part)
+
+                    # If still not found, try with underscores
+                    if diagnosis_info is None:
+                        disease_part_underscore = disease_part.lower().replace(' ', '_')
+                        diagnosis_info = get_diagnosis_info(disease_part_underscore)
+
+                    if diagnosis_info:
+                        logger.debug(f"Mapped label '{raw_label}' -> '{disease_part}'")
+            except Exception:
+                diagnosis_info = None
+
+        if diagnosis_info:
+            diagnoses.append({
+                "source": source,
+                "label": normalize_label(raw_label),
+                "confidence": pred['score'],
+                "category": diagnosis_info.category,
+                "subcategory": diagnosis_info.subcategory,
+                "info": diagnosis_info
+            })
+        else:
+            logger.warning(f"No mapping found for label: {raw_label}")
+
+    if not diagnoses:
+        logger.warning("All disease predictions failed to map to database")
+    else:
+        logger.info(f"Successfully mapped {len(diagnoses)} diagnoses")
+
+    max_confidence = max([p['score'] for p in predictions]) if predictions else 0.0
+
+    return {
+        "diagnoses": diagnoses,
+        "confidence": max_confidence,
+        "source": source,
+        "model_format": _disease_model_format
+    }
 
 def _run_llava_symptom_analysis(image_path: str) -> Dict:
     """LLaVA for nutrient deficiencies + symptom description"""
@@ -273,9 +484,9 @@ def _merge_results(disease_results: Dict, symptom_results: Dict) -> List[Dict]:
         logger.warning("No diagnoses from either model, returning empty result")
         return []
 
-    # Prioritize: High-conf disease > LLaVA nutrients > low-conf disease
+    # Prioritize: High-conf disease (TFLite/MobileNet) > LLaVA nutrients > low-conf
     sorted_diagnoses = sorted(all_diagnoses, key=lambda x: (
-        1 if x.get("source") == "mobilenet" and x.get("confidence", 0) > 0.7 else
+        1 if x.get("source") in ["mobilenet", "tflite", "huggingface"] and x.get("confidence", 0) > 0.7 else
         2 if x.get("source") == "llava" and x.get("confidence", 0) > 0.75 else
         3,
         -x.get("confidence", 0)  # Secondary sort by confidence (descending)

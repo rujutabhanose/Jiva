@@ -594,6 +594,70 @@ DISEASE_MAPPINGS = {
             "severe": "Extensive plant death, oozing lesions"
         }
     ),
+
+    # Apple Scab
+    "apple_scab": DiagnosisInfo(
+        category="fungal",
+        subcategory="apple_scab",
+        name="Apple Scab",
+        symptoms=[
+            "Olive-green to dark brown velvety spots on leaves",
+            "Scabby, corky lesions on fruit surface",
+            "Leaves may curl, yellow, and drop early",
+            "Deformed or cracked fruit",
+            "Dark spots on leaf undersides"
+        ],
+        causes=[
+            "Venturia inaequalis fungus",
+            "Cool, wet spring weather",
+            "Rain splash spreading spores",
+            "Infected fallen leaves overwintering",
+            "Poor air circulation in canopy"
+        ],
+        treatment=[
+            "Remove and destroy fallen leaves in autumn",
+            "Apply fungicide (captan or myclobutanil) at green tip stage",
+            "Prune trees to improve air circulation",
+            "Plant scab-resistant apple varieties",
+            "Apply sulfur or copper-based fungicide preventatively",
+            "Avoid overhead irrigation"
+        ],
+        severity_indicators={
+            "mild": "Few spots on leaves, minimal fruit damage",
+            "moderate": "Widespread leaf spots, some fruit lesions",
+            "severe": "Heavy defoliation, cracked and deformed fruit"
+        }
+    ),
+
+    # Healthy plant (no disease)
+    "healthy": DiagnosisInfo(
+        category="healthy",
+        subcategory="healthy",
+        name="Healthy Plant",
+        symptoms=[
+            "Vibrant green foliage",
+            "No visible spots or lesions",
+            "Normal leaf shape and texture",
+            "Strong stems and growth"
+        ],
+        causes=[
+            "Proper care and maintenance",
+            "Good watering practices",
+            "Adequate sunlight",
+            "Balanced nutrition"
+        ],
+        treatment=[
+            "Continue current care routine",
+            "Monitor for any changes",
+            "Maintain consistent watering",
+            "Ensure adequate light exposure"
+        ],
+        severity_indicators={
+            "mild": "Plant appears healthy",
+            "moderate": "Plant appears healthy",
+            "severe": "Plant appears healthy"
+        }
+    ),
 }
 
 
@@ -632,6 +696,33 @@ LABEL_ALIASES = {
     "corn_with_common_rust": "leaf_spot",
     "tomato_with_bacterial_spot": "bacterial_spot",
     "pepper_with_bacterial_spot": "bacterial_spot",
+    "apple_with_apple_scab": "apple_scab",
+    "apple_scab": "apple_scab",
+
+    # TFLite model labels (format: "Crop_Disease" or "Crop___Disease")
+    "tomato_late_blight": "late_blight",
+    "tomato_early_blight": "early_blight",
+    "tomato_bacterial_spot": "bacterial_spot",
+    "tomato_leaf_mold": "leaf_spot",  # Map to leaf_spot
+    "tomato_septoria_leaf_spot": "leaf_spot",  # Map to leaf_spot
+    "tomato_spider_mites_two_spotted_spider_mite": "general_plant_stress",  # Map to general stress
+    "tomato__target_spot": "leaf_spot",  # Map to leaf_spot
+    "tomato__tomato_yellowleaf__curl_virus": "general_plant_stress",  # Viral - map to stress
+    "tomato__tomato_mosaic_virus": "general_plant_stress",  # Viral - map to stress
+    "tomato_healthy": "healthy",
+    "potato___early_blight": "early_blight",
+    "potato___late_blight": "late_blight",
+    "potato___healthy": "healthy",
+    "pepper__bell___bacterial_spot": "bacterial_spot",
+    "pepper__bell___healthy": "healthy",
+    "late_blight": "late_blight",
+    "early_blight": "early_blight",
+    "leaf_mold": "leaf_spot",
+    "septoria_leaf_spot": "leaf_spot",
+    "target_spot": "leaf_spot",
+    "spider_mites": "general_plant_stress",
+    "mosaic_virus": "general_plant_stress",
+    "yellow_leaf_curl": "general_plant_stress",
 }
 
 
