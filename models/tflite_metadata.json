@@ -1,0 +1,22 @@
+{
+  "models": {
+    "disease_detector": {
+      "full": "disease_detector.tflite",
+      "quantized": "disease_detector_int8.tflite",
+      "size_full_mb": 79.985595703125,
+      "size_quantized_mb": 21.74811553955078,
+      "classes": 21,
+      "input_size": 224
+    },
+    "nutrient_detector": {
+      "full": "nutrient_detector.tflite",
+      "quantized": "nutrient_detector_int8.tflite",
+      "size_full_mb": 4.251499176025391,
+      "size_quantized_mb": 1.23590087890625,
+      "classes": 9,
+      "input_size": 224
+    }
+  },
+  "total_size_mb": 84.23709487915039,
+  "total_size_quantized_mb": 22.98401641845703
+}

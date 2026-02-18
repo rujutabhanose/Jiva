@@ -64,16 +64,22 @@ images/
 static/uploads/
 data/
 
-# ML Models Cache (top-level only, not app/models/)
-/models/
+# ML Models - ignore heavy training artifacts, keep deployment models
 *.pth
 *.pt
 *.safetensors
 *.keras
 *.h5
-*.tflite
 *.onnx
 *.pkl
+
+# Keep TFLite models and config JSON for deployment
+# (force-track with: git add -f models/*.tflite models/*.json)
+!/models/
+/models/*
+!/models/*.tflite
+!/models/*.json
+!/models/versions/
 checkpoints/
 checkpoints_disease_only/
 .cache/
