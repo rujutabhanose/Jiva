@@ -357,8 +357,8 @@ class ModelTrainer:
             return None
 
     def _prepare_for_finetuning(
-        self, model: tf.keras.Model, num_classes: int, learning_rate: float
-    ) -> tf.keras.Model:
+        self, model, num_classes: int, learning_rate: float
+    ):
         """
         Prepare a model for fine-tuning by freezing base layers.
 

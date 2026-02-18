@@ -62,7 +62,12 @@ alembic/versions/*.py
 uploads/
 images/
 static/uploads/
-data/
+
+# Data - ignore training data but keep processed config files
+data/*
+!data/processed/
+data/processed/*
+!data/processed/unified_class_index.json
 
 # ML Models - ignore heavy training artifacts, keep deployment models
 *.pth
