@@ -1,12 +1,8 @@
+import logging
 from fastapi import APIRouter
 from app.api.v1 import users, auth, scans, identify, diagnose, feedback, admin_training
 
-# Import enhanced plant identification router
-import sys
-from pathlib import Path
-backend_root = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(backend_root))
-from scripts.plant_id.plant_identifier_enhanced_api import plant_id_router
+logger = logging.getLogger(__name__)
 
 api_router = APIRouter()
 
@@ -21,5 +17,13 @@ api_router.include_router(feedback.router, prefix="/feedback", tags=["Feedback"]
 # Admin endpoints for continuous learning
 api_router.include_router(admin_training.router, prefix="/admin", tags=["Admin - Training"])
 
-# Enhanced plant identification with ensemble models
-api_router.include_router(plant_id_router, tags=["Enhanced Plant ID"])
+# Enhanced plant identification with ensemble models (requires tensorflow)
+try:
+    import sys
+    from pathlib import Path
+    backend_root = Path(__file__).parent.parent.parent.parent
+    sys.path.insert(0, str(backend_root))
+    from scripts.plant_id.plant_identifier_enhanced_api import plant_id_router
+    api_router.include_router(plant_id_router, tags=["Enhanced Plant ID"])
+except ImportError:
+    logger.info("Enhanced Plant ID (ensemble) not available — requires tensorflow")
