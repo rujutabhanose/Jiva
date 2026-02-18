@@ -20,7 +20,11 @@ import asyncio
 
 import numpy as np
 from PIL import Image
-import tensorflow as tf
+try:
+    import tflite_runtime.interpreter as tflite
+except ImportError:
+    import tensorflow as tf
+    tflite = tf.lite
 from huggingface_hub import InferenceClient
 
 from app.services.coleaf_engine import run_coleaf, get_model_version_id as get_coleaf_version
@@ -70,7 +74,7 @@ def _load_tflite_disease_model():
     for model_path in [TFLITE_QUANTIZED, TFLITE_FULL]:
         if model_path.exists():
             try:
-                interpreter = tf.lite.Interpreter(model_path=str(model_path))
+                interpreter = tflite.Interpreter(model_path=str(model_path))
                 interpreter.allocate_tensors()
                 _tflite_interpreter = interpreter
                 _tflite_model_path = model_path
