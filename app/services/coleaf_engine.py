@@ -5,7 +5,7 @@ CoLeaf nutrient deficiency classifier integration.
 Model loading priority:
   1. TFLite quantized (nutrient_detector_int8.tflite) - fastest, smallest
   2. TFLite full (nutrient_detector.tflite) - fallback
-  3. Keras model (coleaf_production_v2.keras) - fallback
+  3. Keras model (coleaf_production_v2.keras) - fallback (requires full tensorflow)
 
 Config:
   backend/models/class_indices.json
@@ -34,14 +34,31 @@ from typing import Dict, Any, Optional
 import numpy as np
 from PIL import Image
 
-# Use standard TensorFlow/Keras (model saved with Functional API in Keras 3.x)
-import tensorflow as tf
-from tensorflow import keras
-
 from app.services.model_manager import model_manager
 from app.services.custom_losses import FocalLoss
 
 logger = logging.getLogger(__name__)
+
+# TFLite interpreter: prefer tflite_runtime, fall back to full tensorflow
+try:
+    import tflite_runtime.interpreter as tflite
+    _HAS_TFLITE = True
+except ImportError:
+    try:
+        import tensorflow as tf
+        tflite = tf.lite
+        _HAS_TFLITE = True
+    except ImportError:
+        _HAS_TFLITE = False
+
+# Full tensorflow for Keras model loading (training environments only)
+try:
+    import tensorflow as tf
+    from tensorflow import keras
+    _HAS_TF = True
+except ImportError:
+    _HAS_TF = False
+    logger.info("TensorFlow not available — Keras model fallback disabled (TFLite inference only)")
 
 # Paths
 BASE_DIR = Path(__file__).resolve().parents[2]   # .../backend
@@ -96,10 +113,14 @@ def _load_tflite_interpreter():
     if _tflite_interpreter is not None:
         return _tflite_interpreter
 
+    if not _HAS_TFLITE:
+        logger.warning("No TFLite runtime available for CoLeaf")
+        return None
+
     for model_path in [TFLITE_QUANTIZED, TFLITE_FULL]:
         if model_path.exists():
             try:
-                interpreter = tf.lite.Interpreter(model_path=str(model_path))
+                interpreter = tflite.Interpreter(model_path=str(model_path))
                 interpreter.allocate_tensors()
                 _tflite_interpreter = interpreter
                 _model_format = "tflite"
@@ -113,11 +134,15 @@ def _load_tflite_interpreter():
 
 
 def _load_keras_model():
-    """Load Keras model as fallback."""
+    """Load Keras model as fallback (requires full tensorflow)."""
     global _keras_model, _model_format
 
     if _keras_model is not None:
         return _keras_model
+
+    if not _HAS_TF:
+        logger.info("Keras model fallback skipped — tensorflow not installed")
+        return None
 
     try:
         _keras_model = tf.keras.models.load_model(

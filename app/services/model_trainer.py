@@ -16,10 +16,6 @@ import asyncio
 
 import numpy as np
 from PIL import Image
-import tensorflow as tf
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
-from sklearn.model_selection import train_test_split
 import httpx
 
 from sqlalchemy.orm import Session
@@ -30,6 +26,17 @@ from app.services.model_manager import model_manager, MODELS_DIR, VERSIONED_MODE
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Full tensorflow required for training — only available in training environments (GitHub Actions)
+try:
+    import tensorflow as tf
+    from tensorflow.keras.preprocessing.image import ImageDataGenerator
+    from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
+    from sklearn.model_selection import train_test_split
+    _HAS_TF = True
+except ImportError:
+    _HAS_TF = False
+    logger.info("TensorFlow not available — model training disabled (use GitHub Actions)")
 
 
 class ModelTrainer:
@@ -45,6 +52,8 @@ class ModelTrainer:
     """
 
     def __init__(self, db: Session):
+        if not _HAS_TF:
+            raise RuntimeError("Model training requires tensorflow — run via GitHub Actions")
         self.db = db
         self.training_service = TrainingDataService(db)
         self.img_size = 224
@@ -414,6 +423,13 @@ async def run_training_job(
     Returns:
         Dictionary with training results
     """
+    if not _HAS_TF:
+        return {
+            "success": False,
+            "message": "Training unavailable — tensorflow not installed. Use GitHub Actions for retraining.",
+            "metrics": None,
+        }
+
     trainer = ModelTrainer(db)
 
     if model_type == "coleaf":

@@ -3,6 +3,9 @@ Model Scheduler Service
 
 Handles scheduled model retraining using APScheduler.
 Runs weekly checks and triggers retraining when sufficient data is available.
+
+On lightweight deployments (tflite-runtime only), the scheduler is disabled
+and retraining happens via GitHub Actions instead.
 """
 
 import logging
@@ -10,19 +13,26 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
+
+# APScheduler + training are optional (not needed on tflite-runtime deployments)
+try:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    _HAS_SCHEDULER = True
+except ImportError:
+    _HAS_SCHEDULER = False
+    logger.info("APScheduler not available — scheduled training disabled (use GitHub Actions)")
+
 from app.db.session import SessionLocal
 from app.services.training_data_service import TrainingDataService
 from app.services.model_trainer import run_training_job
 from app.core.config import settings
 
-logger = logging.getLogger(__name__)
-
 # Global scheduler instance
-scheduler: Optional[AsyncIOScheduler] = None
+scheduler = None
 
 
 async def weekly_training_check():
@@ -129,6 +139,10 @@ def init_scheduler():
     """
     global scheduler
 
+    if not _HAS_SCHEDULER:
+        logger.info("Scheduler not available — retraining handled by GitHub Actions")
+        return
+
     if scheduler is not None:
         logger.warning("Scheduler already initialized")
         return
@@ -207,7 +221,7 @@ def trigger_immediate_training(model_type: str) -> dict:
     if scheduler is None:
         return {
             "success": False,
-            "message": "Scheduler not initialized",
+            "message": "Scheduler not initialized — training handled by GitHub Actions",
         }
 
     # Add a one-time job
