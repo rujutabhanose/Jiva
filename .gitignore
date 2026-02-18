@@ -64,8 +64,8 @@ images/
 static/uploads/
 data/
 
-# ML Models Cache
-models/
+# ML Models Cache (top-level only, not app/models/)
+/models/
 *.pth
 *.pt
 *.safetensors
