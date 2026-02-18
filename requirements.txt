@@ -21,7 +21,7 @@ Pillow==10.4.0
 numpy>=1.26.0
 
 # ML/AI - Lightweight (TFLite + Cloud API)
-tflite-runtime==2.14.0
+ai-edge-litert>=2.1.0
 huggingface_hub==0.26.2
 
 # Environment

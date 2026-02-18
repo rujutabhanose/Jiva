@@ -23,17 +23,7 @@ from app.services.custom_losses import FocalLoss
 
 logger = logging.getLogger(__name__)
 
-# TFLite interpreter: prefer tflite_runtime, fall back to full tensorflow
-try:
-    import tflite_runtime.interpreter as tflite
-    _HAS_TFLITE = True
-except ImportError:
-    try:
-        import tensorflow as tf
-        tflite = tf.lite
-        _HAS_TFLITE = True
-    except ImportError:
-        _HAS_TFLITE = False
+from app.services.tflite_compat import TFLiteInterpreter, HAS_TFLITE as _HAS_TFLITE
 
 # Full tensorflow for Keras model loading (training environments only)
 try:
@@ -212,7 +202,7 @@ class ModelManager:
             return None
 
         try:
-            interpreter = tflite.Interpreter(model_path=str(path))
+            interpreter = TFLiteInterpreter(model_path=str(path))
             interpreter.allocate_tensors()
             logger.info(f"TFLite model loaded: {path.name}")
             return interpreter
