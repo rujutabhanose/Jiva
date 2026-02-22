@@ -92,14 +92,23 @@ def create_coupon_interactive():
         db.close()
 
 
-def create_quick_coupon(code, plan_type="monthly", days=30, max_uses=100):
-    """Quick coupon creation with defaults"""
+def create_quick_coupon(code, plan_type="monthly", days=None, max_uses=None):
+    """Quick coupon creation with defaults.
+
+    Args:
+        code:      Coupon code (uppercased automatically).
+        plan_type: 'monthly' | 'yearly' | 'lifetime'.
+        days:      Days until expiration, or None for no expiry.
+        max_uses:  Maximum redemptions, or None for unlimited.
+    """
     db = SessionLocal()
     try:
         existing = db.query(Coupon).filter(Coupon.code == code.upper()).first()
         if existing:
             print(f"❌ Coupon '{code}' already exists")
             return False
+
+        expires_at = datetime.utcnow() + timedelta(days=days) if days else None
 
         coupon = Coupon(
             code=code.upper(),
@@ -108,13 +117,15 @@ def create_quick_coupon(code, plan_type="monthly", days=30, max_uses=100):
             max_uses=max_uses,
             current_uses=0,
             is_active=True,
-            expires_at=datetime.utcnow() + timedelta(days=days)
+            expires_at=expires_at,
         )
 
         db.add(coupon)
         db.commit()
 
-        print(f"✅ Created: {code.upper()} ({plan_type}, {max_uses} uses, expires in {days} days)")
+        expiry_str = f"expires in {days} days" if days else "no expiry"
+        uses_str = f"{max_uses} uses" if max_uses else "unlimited uses"
+        print(f"✅ Created: {code.upper()} ({plan_type}, {uses_str}, {expiry_str})")
         return True
 
     except Exception as e:
@@ -129,11 +140,14 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) > 1:
-        # Quick mode: python create_coupon.py MYCODE
+        # Quick mode: python create_coupon.py MYCODE [plan_type] [days_or_0_for_none] [max_uses_or_0_for_unlimited]
         code = sys.argv[1]
         plan = sys.argv[2] if len(sys.argv) > 2 else "monthly"
-        days = int(sys.argv[3]) if len(sys.argv) > 3 else 30
-        max_uses = int(sys.argv[4]) if len(sys.argv) > 4 else 100
+        days_arg = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+        max_uses_arg = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+        # 0 means "no limit / no expiry"
+        days = days_arg if days_arg > 0 else None
+        max_uses = max_uses_arg if max_uses_arg > 0 else None
 
         create_quick_coupon(code, plan, days, max_uses)
     else:

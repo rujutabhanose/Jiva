@@ -37,6 +37,15 @@ def seed_coupons():
                 expires_at=None  # No expiration
             ),
             Coupon(
+                code="BETA2026",
+                description="Beta 2026 - lifetime pro access",
+                plan_type="lifetime",
+                max_uses=None,  # Unlimited uses
+                current_uses=0,
+                is_active=True,
+                expires_at=None  # No expiration
+            ),
+            Coupon(
                 code="NURSERY100",
                 description="Nursery professional yearly access",
                 plan_type="yearly",

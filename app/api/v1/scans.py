@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from pathlib import Path
 import json
-from app.api.deps import get_db, get_current_user
+from app.api.deps import get_db, get_current_user, get_admin_user
 from app.models import user as user_model
 from app.models.scan import Scan
 from app.services.image_utils import save_image
@@ -185,6 +185,23 @@ async def get_scans(
         }
         for scan in scans
     ]
+
+
+@router.get("/stats/global")
+async def get_global_scan_stats(
+    admin: user_model.User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Get total scan statistics across all users (admin use)"""
+    total_scans = db.query(Scan).count()
+    diagnosis_scans = db.query(Scan).filter(Scan.mode == "diagnosis").count()
+    identification_scans = db.query(Scan).filter(Scan.mode == "identification").count()
+
+    return {
+        "total_scans": total_scans,
+        "diagnosis_scans": diagnosis_scans,
+        "identification_scans": identification_scans,
+    }
 
 
 @router.get("/{scan_id}", response_model=ScanResponse)

@@ -18,6 +18,7 @@ class User(Base):
     user_type: Mapped[str | None] = mapped_column(String, nullable=True)
     plant_types: Mapped[List[str] | None] = mapped_column(JSON, nullable=True)
 
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     is_premium: Mapped[bool] = mapped_column(Boolean, default=False)
     free_scans_left: Mapped[int] = mapped_column(Integer, default=1)
     scans_used: Mapped[int] = mapped_column(Integer, default=0)

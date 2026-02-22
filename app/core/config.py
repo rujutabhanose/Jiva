@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     # Must have "Make calls to serverless Inference API" permission
     # Get your token from: https://huggingface.co/settings/tokens
     HUGGINGFACE_TOKEN: Optional[str] = None
+    PLANTNET_API_KEY: Optional[str] = None
 
     class Config:
         env_file = ".env"

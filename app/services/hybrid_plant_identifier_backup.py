@@ -159,8 +159,7 @@ class HybridPlantIdentifier:
             # Normalize format
             return {
                 "species": result["plant"],
-                "scientific_name": result.get("scientific_name", result["plant"]),
-                "family": result.get("family"),
+                "scientific_name": result["plant"],  # Cloud model returns scientific name
                 "confidence": result["confidence"],
                 "alternatives": result.get("top_k", []),
                 "source": "cloud",
