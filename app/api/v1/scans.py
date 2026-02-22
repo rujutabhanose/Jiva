@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from pathlib import Path
 import json
+from sqlalchemy import func
 from app.api.deps import get_db, get_current_user, get_admin_user
 from app.models import user as user_model
 from app.models.scan import Scan
@@ -193,14 +194,20 @@ async def get_global_scan_stats(
     db: Session = Depends(get_db)
 ):
     """Get total scan statistics across all users (admin use)"""
-    total_scans = db.query(Scan).count()
-    diagnosis_scans = db.query(Scan).filter(Scan.mode == "diagnosis").count()
-    identification_scans = db.query(Scan).filter(Scan.mode == "identification").count()
+    # All diagnosis attempts (saved or not) — tracked in users.scans_used
+    total_diagnosis_attempts = db.query(func.sum(user_model.User.scans_used)).scalar() or 0
+
+    # Saved scans from the scans table
+    saved_total = db.query(Scan).count()
+    saved_diagnosis = db.query(Scan).filter(Scan.mode == "diagnosis").count()
+    saved_identification = db.query(Scan).filter(Scan.mode == "identification").count()
 
     return {
-        "total_scans": total_scans,
-        "diagnosis_scans": diagnosis_scans,
-        "identification_scans": identification_scans,
+        "total_diagnosis_attempts": total_diagnosis_attempts,       # all diagnoses, saved or not
+        "total_identification_scans": saved_identification,          # identifications are always saved
+        "total_scans": total_diagnosis_attempts + saved_identification,
+        "saved_scans": saved_total,
+        "unsaved_diagnosis_scans": total_diagnosis_attempts - saved_diagnosis,
     }
 
 
