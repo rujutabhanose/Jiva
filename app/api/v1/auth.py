@@ -189,7 +189,9 @@ async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(
     db.commit()
 
     # Send OTP via email
-    send_password_reset_otp(email=request.email, otp=otp, name=user.name)
+    email_sent = send_password_reset_otp(email=request.email, otp=otp, name=user.name)
+    if not email_sent:
+        raise HTTPException(status_code=500, detail="Failed to send reset email. Please try again.")
 
     return {"message": "If an account exists with this email, you will receive a reset code."}
 
