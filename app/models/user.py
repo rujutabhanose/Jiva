@@ -27,4 +27,9 @@ class User(Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # India free-tier fields (set at registration based on IP geolocation)
+    registration_ip: Mapped[str | None] = mapped_column(String, nullable=True)
+    ip_country: Mapped[str | None] = mapped_column(String, nullable=True)
+    india_free_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

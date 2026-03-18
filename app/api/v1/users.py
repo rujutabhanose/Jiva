@@ -25,6 +25,7 @@ class UserProfile(BaseModel):
     is_premium: bool = False
     free_scans_left: int = 1
     scans_used: int = 0
+    india_free_expires_at: Optional[str] = None
 
 
 class UpdateProfileRequest(BaseModel):
@@ -66,7 +67,8 @@ async def get_user_profile(
         "created_at": user.created_at.isoformat(),
         "is_premium": user.is_premium,
         "free_scans_left": user.free_scans_left,
-        "scans_used": user.scans_used
+        "scans_used": user.scans_used,
+        "india_free_expires_at": user.india_free_expires_at.isoformat() if user.india_free_expires_at else None,
     }
 
 
@@ -109,7 +111,8 @@ async def update_profile(
         "created_at": user.created_at.isoformat(),
         "is_premium": user.is_premium,
         "free_scans_left": user.free_scans_left,
-        "scans_used": user.scans_used
+        "scans_used": user.scans_used,
+        "india_free_expires_at": user.india_free_expires_at.isoformat() if user.india_free_expires_at else None,
     }
 
 

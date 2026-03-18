@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from sqlalchemy.orm import Session
+from datetime import datetime, timedelta
 import secrets
 import random
 import string
@@ -14,6 +15,7 @@ from app.core.security import (
     create_access_token,
 )
 from app.core.email import send_password_reset_otp
+from app.services.geolocation import get_country_from_ip, extract_client_ip
 
 router = APIRouter()
 
@@ -106,12 +108,21 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/register", response_model=TokenResponse)
-async def register(request: RegisterRequest, db: Session = Depends(get_db)):
+async def register(request: RegisterRequest, http_request: Request, db: Session = Depends(get_db)):
     """Register a new user. All users start with 1 free diagnosis scan."""
 
     existing_user = db.query(User).filter(User.email == request.email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
+
+    # Geolocate the client IP to verify India users — not the user-selected country
+    client_ip = extract_client_ip(http_request)
+    ip_country = await get_country_from_ip(client_ip) if client_ip else None
+    india_free_expires_at = (
+        datetime.utcnow() + timedelta(days=183)  # ~6 months
+        if ip_country == "IN"
+        else None
+    )
 
     # Create new user - starts with 1 free scan (free_scans_left defaults to 1)
     user = User(
@@ -124,6 +135,9 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         device_id=request.device_id,  # Keep for analytics
         platform=request.platform,
         is_verified=True,
+        registration_ip=client_ip,
+        ip_country=ip_country,
+        india_free_expires_at=india_free_expires_at,
     )
     db.add(user)
     db.commit()
