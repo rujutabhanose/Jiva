@@ -13,6 +13,8 @@ from app.core.security import (
     hash_password,
     verify_password,
     create_access_token,
+    create_refresh_token,
+    verify_refresh_token,
 )
 from app.core.email import send_password_reset_otp
 from app.services.geolocation import get_country_from_ip, extract_client_ip
@@ -47,8 +49,19 @@ class RegisterRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user: dict
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -88,11 +101,13 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     if not verify_password(request.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    # Create access token
+    # Create tokens
     access_token = create_access_token(subject=user.email)
+    refresh_token = create_refresh_token(subject=user.email)
 
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "user": {
             "id": user.id,
@@ -143,11 +158,13 @@ async def register(request: RegisterRequest, http_request: Request, db: Session 
     db.commit()
     db.refresh(user)
 
-    # Create access token
+    # Create tokens
     access_token = create_access_token(subject=user.email)
+    refresh_token = create_refresh_token(subject=user.email)
 
     return {
         "access_token": access_token,
+        "refresh_token": refresh_token,
         "token_type": "bearer",
         "user": {
             "id": user.id,
@@ -167,6 +184,27 @@ async def logout():
     # In a stateless JWT system, logout is handled client-side
     # by removing the token from storage
     return {"message": "Logged out successfully"}
+
+
+@router.post("/refresh", response_model=RefreshResponse)
+async def refresh_token(request: RefreshRequest, db: Session = Depends(get_db)):
+    """Exchange a valid refresh token for a new access token + rotated refresh token"""
+    email = verify_refresh_token(request.refresh_token)
+
+    # Ensure the user still exists
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        from fastapi import status as http_status
+        raise HTTPException(status_code=http_status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    new_access_token = create_access_token(subject=email)
+    new_refresh_token = create_refresh_token(subject=email)
+
+    return {
+        "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer",
+    }
 
 
 def generate_otp() -> str:
