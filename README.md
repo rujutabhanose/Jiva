@@ -4,11 +4,15 @@ Backend API for the Jiva Plants mobile application - A plant care management sys
 
 ## Features
 
-- User authentication (login/register)
-- Plant identification via image upload
-- Plant health diagnosis
-- Scan history management
-- User profile management
+- User authentication (login, register, OTP verification, password reset)
+- Plant identification via image upload (hybrid ML + external API)
+- Plant disease diagnosis with treatment plans
+- Scan history management with image storage (Supabase)
+- User profile management with Pro/free tier enforcement
+- Coupon code system for Pro access
+- Diagnosis feedback collection and model retraining pipeline
+- Geolocation-based free access (India free tier)
+- Admin tools for training data and model management
 
 ## Tech Stack
 
@@ -125,24 +129,61 @@ Once running, visit:
 
 ```
 backend/
- app/
-    api/
-       v1/
-           auth.py       # Authentication endpoints
-           users.py      # User management
-           scans.py      # Scan history
-           identify.py   # Plant identification
-           diagnose.py   # Plant diagnosis
-           router.py     # Main API router
-    core/
-       config.py         # App configuration
-       security.py       # Security utilities
-    db/                   # Database models
-    schemas/              # Pydantic schemas
-    services/             # Business logic
-    main.py              # FastAPI app entry point
- pyproject.toml           # Poetry dependencies
- README.md
+├── app/
+│   ├── api/
+│   │   ├── deps.py                        # Shared dependencies (auth, DB session)
+│   │   └── v1/
+│   │       ├── auth.py                    # Login, register, OTP, password reset
+│   │       ├── users.py                   # Profile, upgrade to Pro, cancel subscription
+│   │       ├── scans.py                   # Scan CRUD + notes
+│   │       ├── identify.py                # Plant identification endpoint
+│   │       ├── diagnose.py                # Plant diagnosis endpoint
+│   │       ├── feedback.py                # Diagnosis feedback collection
+│   │       ├── admin_training.py          # Admin: training data & model management
+│   │       └── router.py                  # Mounts all v1 routers
+│   ├── core/
+│   │   ├── config.py                      # App settings (env vars)
+│   │   ├── security.py                    # JWT, password hashing
+│   │   └── email.py                       # Email sending (OTP, reset)
+│   ├── db/
+│   │   ├── session.py                     # SQLAlchemy engine & session
+│   │   ├── base.py                        # Base model import aggregator
+│   │   └── init_db.py                     # DB initialisation
+│   ├── models/
+│   │   ├── user.py                        # User table
+│   │   ├── scan.py                        # Scan table
+│   │   ├── coupon.py                      # Coupon codes
+│   │   ├── coupon_redemption.py           # Coupon redemption records
+│   │   ├── diagnosis_feedback.py          # User feedback on diagnoses
+│   │   ├── model_version.py               # ML model version tracking
+│   │   ├── password_reset.py              # Password reset tokens
+│   │   └── training_data.py               # Training data records
+│   ├── services/
+│   │   ├── diagnosis_engine.py            # Core disease diagnosis logic
+│   │   ├── plant_identifier.py            # Plant identification (ML)
+│   │   ├── hybrid_plant_identifier.py     # Hybrid ML + API identifier
+│   │   ├── coleaf_engine.py               # CoLeaf model inference
+│   │   ├── model_manager.py               # ML model loading & versioning
+│   │   ├── model_trainer.py               # Model retraining pipeline
+│   │   ├── model_scheduler.py             # Scheduled retraining jobs
+│   │   ├── training_data_service.py       # Training data management
+│   │   ├── disease_mapping.py             # Disease label mappings
+│   │   ├── plant_info.py                  # Plant metadata lookup
+│   │   ├── image_utils.py                 # Image preprocessing helpers
+│   │   ├── scan_limits.py                 # Free/Pro scan limit enforcement
+│   │   ├── geolocation.py                 # IP-based India free tier detection
+│   │   ├── supabase_storage.py            # Image upload to Supabase Storage
+│   │   ├── quality_gate.py                # Model quality checks before deploy
+│   │   ├── custom_losses.py               # Custom ML loss functions
+│   │   └── tflite_compat.py               # TFLite compatibility layer
+│   ├── scripts/
+│   │   ├── seed_coupons.py                # Seed coupon codes into DB
+│   │   └── grant_pro_access.py            # Manually grant Pro to a user
+│   └── main.py                            # FastAPI app entry point
+├── requirements.txt                       # Pip dependencies
+├── runtime.txt                            # Python version for deployment
+├── render.yaml                            # Render.com deployment config
+└── README.md
 ```
 
 ## API Endpoints
@@ -177,13 +218,3 @@ Run with hot reload:
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
-
-## TODO
-
-- [ ] Implement database models and migrations
-- [ ] Add actual authentication with JWT tokens
-- [ ] Integrate AI models for plant identification
-- [ ] Add image storage (S3 or similar)
-- [ ] Implement comprehensive error handling
-- [ ] Add unit and integration tests
-- [ ] Set up CI/CD pipeline
