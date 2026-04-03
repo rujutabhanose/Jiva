@@ -174,7 +174,8 @@ async def register(request: RegisterRequest, http_request: Request, db: Session 
             "userType": user.user_type,
             "plantTypes": user.plant_types,
             "isPremium": user.is_premium,
-            "freeScansLeft": user.free_scans_left
+            "freeScansLeft": user.free_scans_left,
+            "indiaFreeExpiresAt": user.india_free_expires_at.isoformat() if user.india_free_expires_at else None
         }
     }
 
