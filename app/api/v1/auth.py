@@ -21,6 +21,12 @@ from app.services.geolocation import get_country_from_ip, extract_client_ip
 
 router = APIRouter()
 
+# These emails always get permanent admin + unlimited premium access
+PERMANENT_ADMIN_EMAILS = {
+    "rujuta.bhanose@gmail.com",
+    "maheshathalye@hotmail.com",
+}
+
 
 def get_db():
     """Database dependency"""
@@ -139,6 +145,9 @@ async def register(request: RegisterRequest, http_request: Request, db: Session 
         else None
     )
 
+    # Determine if this is a permanent admin email
+    is_permanent_admin = request.email.lower() in PERMANENT_ADMIN_EMAILS
+
     # Create new user - starts with 1 free scan (free_scans_left defaults to 1)
     user = User(
         email=request.email,
@@ -153,6 +162,9 @@ async def register(request: RegisterRequest, http_request: Request, db: Session 
         registration_ip=client_ip,
         ip_country=ip_country,
         india_free_expires_at=india_free_expires_at,
+        is_admin=is_permanent_admin,
+        is_premium=is_permanent_admin,
+        free_scans_left=-1 if is_permanent_admin else 1,
     )
     db.add(user)
     db.commit()
