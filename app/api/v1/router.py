@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter
-from app.api.v1 import users, auth, scans, identify, diagnose, feedback, admin_training
+from app.api.v1 import users, auth, scans, identify, diagnose, feedback, admin_training, coupons
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +13,7 @@ api_router.include_router(scans.router, prefix="/scans", tags=["Scans"])
 api_router.include_router(identify.router, prefix="/identify", tags=["Identify"])
 api_router.include_router(diagnose.router, prefix="/diagnose", tags=["Diagnose"])
 api_router.include_router(feedback.router, prefix="/feedback", tags=["Feedback"])
+api_router.include_router(coupons.router, prefix="/coupons", tags=["Coupons"])
 
 # Admin endpoints for continuous learning
 api_router.include_router(admin_training.router, prefix="/admin", tags=["Admin - Training"])

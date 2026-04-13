@@ -8,6 +8,12 @@ def enforce_and_consume_scan(user: User, db: Session):
     Enforces scan limits and consumes one scan atomically.
     Backend is the single source of truth.
     """
+    # Expire timed premium grants
+    if user.is_premium and user.premium_expires_at and user.premium_expires_at < datetime.utcnow():
+        user.is_premium = False
+        user.free_scans_left = max(0, 1 - user.scans_used)
+        db.commit()
+
     if user.is_premium:
         return
 

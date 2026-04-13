@@ -31,5 +31,6 @@ class User(Base):
     registration_ip: Mapped[str | None] = mapped_column(String, nullable=True)
     ip_country: Mapped[str | None] = mapped_column(String, nullable=True)
     india_free_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    premium_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # None = permanent pro
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -69,6 +69,7 @@ async def get_user_profile(
         "free_scans_left": user.free_scans_left,
         "scans_used": user.scans_used,
         "india_free_expires_at": user.india_free_expires_at.isoformat() if user.india_free_expires_at else None,
+        "premium_expires_at": user.premium_expires_at.isoformat() if user.premium_expires_at else None,
     }
 
 
@@ -113,6 +114,7 @@ async def update_profile(
         "free_scans_left": user.free_scans_left,
         "scans_used": user.scans_used,
         "india_free_expires_at": user.india_free_expires_at.isoformat() if user.india_free_expires_at else None,
+        "premium_expires_at": user.premium_expires_at.isoformat() if user.premium_expires_at else None,
     }
 
 
