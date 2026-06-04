@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
+from pathlib import Path
 from sqlalchemy.orm import Session
 import logging
 
@@ -76,8 +77,13 @@ async def submit_diagnosis_feedback(
     scan = None
     if request.scan_id:
         scan = db.query(Scan).filter(Scan.id == request.scan_id).first()
-        if scan:
-            image_url = scan.image_url
+        if scan and scan.image_url:
+            # scan.image_url is stored as a web path (e.g. "/uploads/abc.jpg").
+            # Translate to a filesystem path the upload service can open.
+            if scan.image_url.startswith("/uploads/"):
+                image_url = str(Path("uploads") / Path(scan.image_url).name)
+            else:
+                image_url = scan.image_url
 
     # Determine model type from condition if not provided
     model_type = request.model_type
